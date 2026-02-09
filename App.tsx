@@ -9,7 +9,7 @@ import { Login } from './components/Login';
 import { DriverReplies } from './components/DriverReplies';
 import { AIAssistant } from './components/AIAssistant';
 import { generateComplianceEmail, generateDriverReply } from './services/geminiService';
-import { fetchSheetData, appendDriverToSheet, updateDriverInSheet } from './services/sheetService';
+import { fetchSheetData, appendDriverToSheet, updateDriverInSheet, clearDriverRow } from './services/sheetService';
 import { sendGmailMessage } from './services/gmailService';
 import { Sidebar, SidebarBody, SidebarLink } from './components/ui/sidebar';
 
@@ -423,11 +423,10 @@ const App: React.FC = () => {
     const driverToDelete = drivers.find(d => d.id === id);
     setDrivers(prev => prev.filter(d => d.id !== id));
 
-    // Note: Google Sheets API doesn't have a simple "delete row" without batchUpdate
-    // For now, we just remove it locally. If user wants sheet deletion, 
-    // we would need to implement a 'deleteRow' in sheetService.
+    // Persist deletion (clear row) to Google Sheets
     if (driverToDelete?.sheetRowIndex && sheetConfig.sheetId && user?.accessToken && user.accessToken !== 'demo_token') {
-      console.log("Sheet row deletion is managed via manual clear or batchUpdate (not implemented in v1)");
+      console.log(`Clearing row ${driverToDelete.sheetRowIndex} for deleted driver ${driverToDelete.name}`);
+      await clearDriverRow(sheetConfig.sheetId, driverToDelete.sheetRowIndex, user.accessToken);
     }
   };
 

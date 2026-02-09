@@ -208,6 +208,33 @@ export const updateDriverInSheet = async (sheetIdInput: string, driver: Driver, 
   }
 };
 
+/**
+ * Clears a driver's row in Google Sheets (used for deletion).
+ */
+export const clearDriverRow = async (sheetIdInput: string, rowIndex: number, token: string) => {
+  const sheetId = extractSheetId(sheetIdInput);
+  if (!sheetId || !rowIndex) return;
+
+  const range = `A${rowIndex}:K${rowIndex}`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}:clear`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    if (!response.ok) {
+      const err = await response.json();
+      console.error("Clear Row Error:", err);
+    }
+  } catch (e) {
+    console.error("Failed to clear driver row in sheet", e);
+  }
+};
+
 const mapELDStatus = (val: string): ELDStatus | null => {
   if (!val || val.trim() === "") return null;
   const v = val.trim().toLowerCase();
