@@ -23,9 +23,9 @@ export const SheetSyncControl: React.FC<SheetSyncControlProps> = ({ config, stat
             <p className="text-[11px] text-slate-500 dark:text-slate-400">Real-time fleet source data</p>
           </div>
         </div>
-        <a 
-          href="https://support.google.com/docs/answer/183965" 
-          target="_blank" 
+        <a
+          href="https://support.google.com/docs/answer/183965"
+          target="_blank"
           rel="noopener noreferrer"
           className="p-1.5 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
           title="How to publish to web"
@@ -47,9 +47,8 @@ export const SheetSyncControl: React.FC<SheetSyncControlProps> = ({ config, stat
                 value={config.sheetId}
                 onChange={(e) => onUpdateConfig({ sheetId: e.target.value })}
                 placeholder="Paste your sheet URL here..."
-                className={`block w-full pl-8 pr-3 py-1.5 text-sm border rounded-lg bg-slate-50 dark:bg-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all ${
-                  status === 'error' ? 'border-red-300 dark:border-red-900' : 'border-slate-200 dark:border-slate-700'
-                }`}
+                className={`block w-full pl-8 pr-3 py-1.5 text-sm border rounded-lg bg-slate-50 dark:bg-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all ${status === 'error' ? 'border-red-300 dark:border-red-900' : 'border-slate-200 dark:border-slate-700'
+                  }`}
               />
             </div>
             <button
@@ -79,15 +78,28 @@ export const SheetSyncControl: React.FC<SheetSyncControlProps> = ({ config, stat
         <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-2">
             <label className="relative inline-flex items-center cursor-pointer">
-              <input 
-                type="checkbox" 
-                checked={config.isAutoSync} 
+              <input
+                type="checkbox"
+                checked={config.isAutoSync}
                 onChange={(e) => onUpdateConfig({ isAutoSync: e.target.checked })}
-                className="sr-only peer" 
+                className="sr-only peer"
               />
               <div className="w-7 h-4 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-indigo-600 transition-all"></div>
             </label>
             <span className="text-[11px] font-medium text-slate-600 dark:text-slate-400">Auto-sync (10s)</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={config.isLiveMode}
+                onChange={(e) => onUpdateConfig({ isLiveMode: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-7 h-4 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-600 transition-all"></div>
+            </label>
+            <span className="text-[11px] font-medium text-slate-600 dark:text-slate-400">Live Mode</span>
           </div>
 
           <div className="flex items-center gap-2">

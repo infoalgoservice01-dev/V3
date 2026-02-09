@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Driver, DutyStatus, ELDStatus, FollowUpStatus } from '../types';
 import {
   Search,
@@ -15,7 +15,8 @@ import {
   Mail,
   Trash2,
   CheckCircle,
-  RefreshCcw
+  RefreshCcw,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -39,7 +40,7 @@ interface DriverTableProps {
   onUpdateDriver: (id: string, updates: Partial<Driver>) => void;
   onAddDriver: (driver: Omit<Driver, 'id' | 'emailSent' | 'lastEmailTime'>) => void;
   onDeleteDriver: (id: string) => void;
-  onManualSendEmail: (id: string) => void;
+  onManualSendEmail: (id: string) => Promise<{ sentAt: string }>;
   onResetDriver: (id: string) => void;
 }
 
@@ -56,6 +57,24 @@ export const DriverTable: React.FC<DriverTableProps> = ({
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [sendingId, setSendingId] = useState<string | null>(null);
+
+  const handleSendFollowUp = async (driverId: string) => {
+    setSendingId(driverId);
+    try {
+      await onManualSendEmail(driverId);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to send follow-up');
+    } finally {
+      setSendingId(null);
+    }
+  };
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Edit Driver State
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -371,20 +390,73 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                   </select>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <select
-                    value={driver.followUp}
-                    onChange={(e) => onUpdateDriver(driver.id, { followUp: e.target.value as FollowUpStatus })}
-                    className={`text-xs font-bold px-2 py-1 rounded border ${driver.followUp === FollowUpStatus.ACTION_REQUIRED
-                      ? 'bg-red-600 text-white border-red-700'
-                      : driver.followUp === FollowUpStatus.CONNECT
-                        ? 'bg-blue-600 text-white border-blue-700'
-                        : 'bg-white dark:bg-slate-800 text-slate-400 dark:text-slate-500 border-slate-200 dark:border-slate-700'
-                      }`}
-                  >
-                    <option value={FollowUpStatus.NONE}>None</option>
-                    <option value={FollowUpStatus.ACTION_REQUIRED}>Action required</option>
-                    <option value={FollowUpStatus.CONNECT}>Connect</option>
-                  </select>
+                  {driver.eldStatus === ELDStatus.DISCONNECTED ? (
+                    <div className="flex flex-col gap-1.5">
+                      {(() => {
+                        const lastSent = driver.lastSentAt ? new Date(driver.lastSentAt).getTime() : 0;
+                        const cooldownMs = 60 * 60 * 1000;
+                        const elapsed = currentTime.getTime() - lastSent;
+                        const isCooldowned = elapsed < cooldownMs;
+                        const remainingMs = cooldownMs - elapsed;
+
+                        const formatCountdown = (ms: number) => {
+                          const mins = Math.floor(ms / 60000);
+                          const secs = Math.floor((ms % 60000) / 1000);
+                          return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                        };
+
+                        return (
+                          <>
+                            <button
+                              disabled={isCooldowned || sendingId === driver.id}
+                              onClick={() => handleSendFollowUp(driver.id)}
+                              className={`flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95 ${isCooldowned
+                                ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-200 dark:border-slate-700'
+                                : sendingId === driver.id
+                                  ? 'bg-indigo-400 text-white cursor-wait'
+                                  : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-200 dark:shadow-none'
+                                }`}
+                            >
+                              {sendingId === driver.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Mail className="w-3.5 h-3.5" />
+                              )}
+                              {sendingId === driver.id
+                                ? 'Sending...'
+                                : isCooldowned
+                                  ? `Available in ${formatCountdown(remainingMs)}`
+                                  : 'Send Follow-Up'}
+                            </button>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                              Last Sent: {driver.lastSentAt ? new Date(driver.lastSentAt).toLocaleString(undefined, {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              }) : 'Never'}
+                            </span>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  ) : (
+                    <select
+                      value={driver.followUp}
+                      onChange={(e) => onUpdateDriver(driver.id, { followUp: e.target.value as FollowUpStatus })}
+                      className={`text-xs font-bold px-2 py-1 rounded border ${driver.followUp === FollowUpStatus.ACTION_REQUIRED
+                        ? 'bg-red-600 text-white border-red-700'
+                        : driver.followUp === FollowUpStatus.CONNECT
+                          ? 'bg-blue-600 text-white border-blue-700'
+                          : 'bg-white dark:bg-slate-800 text-slate-400 dark:text-slate-500 border-slate-200 dark:border-slate-700'
+                        }`}
+                    >
+                      <option value={FollowUpStatus.NONE}>None</option>
+                      <option value={FollowUpStatus.ACTION_REQUIRED}>Action required</option>
+                      <option value={FollowUpStatus.CONNECT}>Connect</option>
+                    </select>
+                  )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
                   <div className="flex items-center gap-3">

@@ -7,7 +7,7 @@ export const sendGmailMessage = async (
   to: string,
   subject: string,
   body: string
-): Promise<boolean> => {
+): Promise<{ ok: boolean; error?: string }> => {
   const utf8Subject = `=?utf-8?B?${btoa(unescape(encodeURIComponent(subject)))}?=`;
   const messageParts = [
     `To: ${to}`,
@@ -40,9 +40,14 @@ export const sendGmailMessage = async (
       }
     );
 
-    return response.ok;
-  } catch (error) {
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      return { ok: false, error: text || `HTTP ${response.status}` };
+    }
+
+    return { ok: true };
+  } catch (error: any) {
     console.error('Gmail API Error:', error);
-    return false;
+    return { ok: false, error: error?.message || 'Network error' };
   }
 };

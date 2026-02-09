@@ -12,6 +12,17 @@ import { generateComplianceEmail, generateDriverReply } from './services/geminiS
 import { fetchSheetData, appendDriverToSheet, updateDriverInSheet } from './services/sheetService';
 import { sendGmailMessage } from './services/gmailService';
 import { Sidebar, SidebarBody, SidebarLink } from './components/ui/sidebar';
+
+const buildFollowUpEmail = (driverName: string) => {
+  const subject = `ELD Disconnected – Action Required`;
+  const body =
+    `Hi ${driverName},\n\n` +
+    `Your ELD is showing as DISCONNECTED.\n` +
+    `Please open the ELD app and reconnect as soon as possible.\n\n` +
+    `If you need help, reply to this message.\n\n` +
+    `Thanks.`;
+  return { subject, body };
+};
 import {
   ArrowLeftRight,
   CheckCircle2,
@@ -238,67 +249,85 @@ const App: React.FC = () => {
       setDrivers(prev => prev.map(d => d.id === driver.id ? { ...d, hasPendingAlert: true } : d));
     } else if (!isDisconnected && driver.hasPendingAlert) {
       setDrivers(prev => prev.map(d => d.id === driver.id ? { ...d, hasPendingAlert: false } : d));
-    } else if (!isDisconnected && (driver.emailSent || driver.lastEmailTime)) {
-      setDrivers(prev => prev.map(d => d.id === driver.id ? { ...d, emailSent: false, lastEmailTime: undefined } : d));
+    } else if (!isDisconnected && driver.emailSent) {
+      setDrivers(prev => prev.map(d => d.id === driver.id ? { ...d, emailSent: false } : d));
     }
   }, []);
 
-  const handleManualSendEmail = async (driverId: string) => {
+  const handleManualSendEmail = async (driverId: string): Promise<{ sentAt: string }> => {
     const driver = drivers.find(d => d.id === driverId);
-    if (!driver) return;
+    if (!driver) throw new Error('Driver not found');
 
     if (driver.lastEmailTime) {
       const lastSent = new Date(driver.lastEmailTime).getTime();
       const now = new Date().getTime();
       const oneHour = 60 * 60 * 1000;
       if (now - lastSent < oneHour) {
-        alert("Spam protection active. Wait before sending again.");
-        return;
+        throw new Error("Spam protection active. Wait before sending again.");
       }
     }
 
-    const emailBody = generateComplianceEmail(driver);
+    const { subject, body } = buildFollowUpEmail(driver.name);
     let sentSuccess = true;
     let sentVia: 'Simulation' | 'Gmail API' = 'Simulation';
 
-    if (sheetConfig.isLiveMode && user && user.accessToken !== 'demo_token') {
-      sentSuccess = await sendGmailMessage(user.accessToken, driver.email, "URGENT: ELD Connection Required", emailBody);
+    console.log(`Email Sending Mode: ${sheetConfig.isLiveMode ? 'LIVE' : 'SIMULATION'}`);
+
+    if (sheetConfig.isLiveMode && user?.accessToken && user.accessToken !== 'demo_token') {
+      console.log("Triggering Gmail API message to:", driver.email);
+      const res = await sendGmailMessage(user.accessToken, driver.email, subject, body);
+      sentSuccess = res.ok;
       sentVia = 'Gmail API';
+      if (!sentSuccess) throw new Error(res.error || "Gmail API failed to send message.");
+    } else {
+      console.log("Simulation mode: No real email sent.");
     }
 
-    if (sentSuccess) {
-      const logEntry: EmailLogEntry = {
+    const sentAt = new Date().toISOString();
+
+    const logEntry: EmailLogEntry = {
+      id: Math.random().toString(36).substr(2, 9),
+      driverId: driver.id,
+      driverName: driver.name,
+      timestamp: sentAt,
+      statusAtTime: driver.dutyStatus,
+      content: body,
+      sentVia
+    };
+
+    const updatedDriver = {
+      ...driver,
+      emailSent: true,
+      hasPendingAlert: false,
+      followUp: FollowUpStatus.ACTION_REQUIRED,
+      lastEmailTime: sentAt,
+      lastSentAt: sentAt
+    };
+
+    setDrivers(prev => prev.map(d => d.id === driver.id ? updatedDriver : d));
+    setEmailLogs(prev => [logEntry, ...prev]);
+
+    // Persistence to Google Sheets
+    if (sheetConfig.sheetId && user?.accessToken && user.accessToken !== 'demo_token') {
+      console.log("Persisting update to Google Sheets...");
+      await updateDriverInSheet(sheetConfig.sheetId, updatedDriver, user.accessToken);
+    }
+
+    // Delayed reply simulation
+    setTimeout(async () => {
+      const replyText = await generateDriverReply(driver.name, body);
+      const reply: DriverReply = {
         id: Math.random().toString(36).substr(2, 9),
         driverId: driver.id,
         driverName: driver.name,
         timestamp: new Date().toISOString(),
-        statusAtTime: driver.dutyStatus,
-        content: emailBody,
-        sentVia
+        message: replyText,
+        isRead: false
       };
+      setDriverReplies(prev => [reply, ...prev]);
+    }, 5000 + Math.random() * 5000);
 
-      setDrivers(prev => prev.map(d => d.id === driver.id ? {
-        ...d,
-        emailSent: true,
-        hasPendingAlert: false,
-        followUp: FollowUpStatus.ACTION_REQUIRED,
-        lastEmailTime: new Date().toISOString()
-      } : d));
-      setEmailLogs(prev => [logEntry, ...prev]);
-
-      setTimeout(async () => {
-        const replyText = await generateDriverReply(driver.name, emailBody);
-        const reply: DriverReply = {
-          id: Math.random().toString(36).substr(2, 9),
-          driverId: driver.id,
-          driverName: driver.name,
-          timestamp: new Date().toISOString(),
-          message: replyText,
-          isRead: false
-        };
-        setDriverReplies(prev => [reply, ...prev]);
-      }, 5000 + Math.random() * 5000);
-    }
+    return { sentAt };
   };
 
   const handleSync = useCallback(async () => {
@@ -325,8 +354,17 @@ const App: React.FC = () => {
     }
   }, [sheetConfig.sheetId, user]);
 
-  const handleUpdateDriver = (id: string, updates: Partial<Driver>) => {
-    setDrivers(prev => prev.map(d => d.id === id ? { ...d, ...updates } : d));
+  const handleUpdateDriver = async (id: string, updates: Partial<Driver>) => {
+    setDrivers(prev => {
+      const newDrivers = prev.map(d => d.id === id ? { ...d, ...updates } : d);
+      const updatedDriver = newDrivers.find(d => d.id === id);
+
+      if (updatedDriver && sheetConfig.sheetId && sheetConfig.isBidirectional && user?.accessToken && user.accessToken !== 'demo_token') {
+        updateDriverInSheet(sheetConfig.sheetId, updatedDriver, user.accessToken).catch(console.error);
+      }
+
+      return newDrivers;
+    });
   };
 
   const handleAddDriver = (data: Omit<Driver, 'id' | 'emailSent'>) => {

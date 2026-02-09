@@ -51,6 +51,7 @@ export interface Driver {
   followUp: FollowUpStatus;
   emailSent: boolean;
   lastEmailTime?: string;
+  lastSentAt?: string | null;
   hasPendingAlert?: boolean;
   sheetRowIndex?: number;
 }

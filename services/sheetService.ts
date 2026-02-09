@@ -7,7 +7,7 @@ import { Driver, DutyStatus, ELDStatus, FollowUpStatus } from "../types";
 const extractSheetId = (input: string): string => {
   if (!input) return "";
   const trimmed = input.trim();
-  
+
   // Try matching the standard /d/[ID]/ pattern first
   const dPathMatch = trimmed.match(/\/d\/([a-zA-Z0-9-_]+)/);
   if (dPathMatch && dPathMatch[1]) return dPathMatch[1];
@@ -15,7 +15,7 @@ const extractSheetId = (input: string): string => {
   // Fallback: Try to find any string that looks like a Google ID (usually ~44 chars)
   const idMatch = trimmed.match(/[a-zA-Z0-9-_]{25,100}/);
   if (idMatch) return idMatch[0];
-  
+
   return trimmed;
 };
 
@@ -32,15 +32,15 @@ export const fetchSheetData = async (input: string, accessToken?: string): Promi
   if (accessToken && accessToken !== 'demo_token') {
     return fetchViaApi(sheetId, accessToken);
   }
-  
+
   // Otherwise try the public export route
   return fetchViaPublicCsv(sheetId);
 };
 
 const fetchViaApi = async (sheetId: string, token: string): Promise<Driver[]> => {
-  const range = 'A:I'; 
+  const range = 'A:K';
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}`;
-  
+
   try {
     const response = await fetch(url, {
       headers: { 'Authorization': `Bearer ${token}` }
@@ -59,15 +59,15 @@ const fetchViaApi = async (sheetId: string, token: string): Promise<Driver[]> =>
 
     const data = await response.json();
     const rows: string[][] = data.values || [];
-    
+
     // Check if sheet has at least header + 1 row
     if (rows.length < 2) return [];
 
     return rows.slice(1).map<Driver | null>((columns, index) => {
       // Basic validation: name and email are usually required
       if (columns.length < 2) return null;
-      
-      const [name, email, eld, duty, follow, company, board, deviceType, appVersion] = columns;
+
+      const [name, email, eld, duty, follow, company, board, deviceType, appVersion, lastSentAt, emailSent] = columns;
       return {
         id: email || `drv-${index}`,
         name: name || "Unknown",
@@ -79,7 +79,8 @@ const fetchViaApi = async (sheetId: string, token: string): Promise<Driver[]> =>
         eldStatus: mapELDStatus(eld),
         dutyStatus: mapDutyStatus(duty),
         followUp: mapFollowUpStatus(follow),
-        emailSent: false,
+        emailSent: emailSent === 'TRUE',
+        lastSentAt: lastSentAt || null,
         sheetRowIndex: index + 2 // +1 for 0-index offset, +1 for header row
       };
     }).filter((d): d is Driver => d !== null);
@@ -92,24 +93,24 @@ const fetchViaApi = async (sheetId: string, token: string): Promise<Driver[]> =>
 const fetchViaPublicCsv = async (sheetId: string): Promise<Driver[]> => {
   // Public CSV export URL requires the sheet to be "Published to the web"
   const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
-  
+
   try {
     const response = await fetch(url);
-    
+
     if (!response.ok) {
       if (response.status === 404) {
         throw new Error("Spreadsheet not found: Check that the URL or ID is correct and the sheet hasn't been deleted.");
       }
       throw new Error("Sheet not accessible: To use public sync, you MUST go to File > Share > Publish to the web in your Google Sheet.");
     }
-    
+
     const csvText = await response.text();
-    
+
     // If the sheet is private, Google often responds with a 200 OK but serves a login HTML page instead of CSV
     if (csvText.includes('<!DOCTYPE') || csvText.includes('google-signin') || csvText.includes('login')) {
       throw new Error("Sheet is private: To sync this sheet, either 'Connect Google' in the sidebar or set the sheet to 'Published to the web'.");
     }
-    
+
     return parseCSVToDrivers(csvText);
   } catch (e) {
     console.error("Public Fetch Error:", e);
@@ -126,7 +127,7 @@ const parseCSVToDrivers = (csvText: string): Driver[] => {
     const columns = line.split(',').map(c => c.replace(/^"|"$/g, '').trim());
     if (columns.length < 2) return null;
 
-    const [name, email, eld, duty, follow, company, board, deviceType, appVersion] = columns;
+    const [name, email, eld, duty, follow, company, board, deviceType, appVersion, lastSentAt, emailSent] = columns;
     return {
       id: email || `drv-${index}`,
       name: name || "Unknown",
@@ -138,7 +139,8 @@ const parseCSVToDrivers = (csvText: string): Driver[] => {
       eldStatus: mapELDStatus(eld),
       dutyStatus: mapDutyStatus(duty),
       followUp: mapFollowUpStatus(follow),
-      emailSent: false,
+      emailSent: emailSent === 'TRUE',
+      lastSentAt: lastSentAt || null,
     };
   }).filter((d): d is Driver => d !== null);
 };
@@ -150,17 +152,17 @@ export const appendDriverToSheet = async (sheetIdInput: string, driver: Driver, 
   const sheetId = extractSheetId(sheetIdInput);
   if (!sheetId) return;
 
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A:I:append?valueInputOption=USER_ENTERED`;
-  
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A:K:append?valueInputOption=USER_ENTERED`;
+
   try {
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 
+      headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        values: [[driver.name, driver.email, driver.eldStatus, driver.dutyStatus, driver.followUp, driver.company, driver.board, driver.deviceType, driver.appVersion]]
+        values: [[driver.name, driver.email, driver.eldStatus, driver.dutyStatus, driver.followUp, driver.company, driver.board, driver.deviceType, driver.appVersion, driver.lastSentAt || "", driver.emailSent ? 'TRUE' : 'FALSE']]
       })
     });
 
@@ -178,22 +180,22 @@ export const appendDriverToSheet = async (sheetIdInput: string, driver: Driver, 
  */
 export const updateDriverInSheet = async (sheetIdInput: string, driver: Driver, token: string) => {
   if (!driver.sheetRowIndex) return;
-  
+
   const sheetId = extractSheetId(sheetIdInput);
   if (!sheetId) return;
 
-  const range = `A${driver.sheetRowIndex}:I${driver.sheetRowIndex}`;
+  const range = `A${driver.sheetRowIndex}:K${driver.sheetRowIndex}`;
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?valueInputOption=USER_ENTERED`;
-  
+
   try {
     const response = await fetch(url, {
       method: 'PUT',
-      headers: { 
+      headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        values: [[driver.name, driver.email, driver.eldStatus, driver.dutyStatus, driver.followUp, driver.company, driver.board, driver.deviceType, driver.appVersion]]
+        values: [[driver.name, driver.email, driver.eldStatus, driver.dutyStatus, driver.followUp, driver.company, driver.board, driver.deviceType, driver.appVersion, driver.lastSentAt || "", driver.emailSent ? 'TRUE' : 'FALSE']]
       })
     });
 
