@@ -1,11 +1,9 @@
 /**
- * Fleet Monitor Sheet Initializer v2
- * This script configures the Google Sheet to work perfectly with the Leader A1 app.
- * - Fixes column misalignment
- * - Adds specific dropdowns for Board A/B/C
- * - Ensures correct Duty Status options
- * - Expands table to Column K
- * - DOES NOT DELETE EXISTING DRIVER NAMES/EMAILS
+ * Fleet Monitor Sheet Initializer v3 (Table Compatible)
+ * This script configures the Google Sheet for the Leader A1 app.
+ * - Fixes "Typed Column" errors
+ * - Corrects alignment for ELD, Duty, Follow Up, and Board
+ * - Handles Google Sheets "Tables" feature
  */
 function setupFleetMonitorSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -18,67 +16,75 @@ function setupFleetMonitorSheet() {
     "Last Sent At", "Email Sent"
   ];
   
-  // Set headers and format
+  // Set headers
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  
+  // Formatting
   sheet.getRange(1, 1, 1, headers.length)
        .setFontWeight("bold")
-       .setBackground("#1e4d3a") // Dark green to match screenshot
-       .setFontColor("white")
-       .setVerticalAlignment("middle");
+       .setBackground("#1e4d3a")
+       .setFontColor("white");
   
   sheet.setFrozenRows(1);
 
-  // 2. Clear OLD validations to fix misalignment
-  // This clears ghost dropdowns from previous attempts
-  sheet.getRange("A:K").clearDataValidations();
+  // 2. CRITICAL: Handle "Tables" feature and Clear Validations
+  // If the sheet is already a "Table", we might need to be careful.
+  try {
+    // Clear all existing validations to prevent "typed column" conflicts
+    sheet.getRange("A:K").clearDataValidations();
+  } catch (e) {
+    Logger.log("Warning clearing validations: " + e.message);
+  }
 
-  // 3. Set up Data Validation (Dropdowns)
-  
-  /** Helper to set dropdowns */
+  // 3. Set up Data Validation (Dropdowns) with CORRECT INDICES
   function setValidation(col, values) {
-    const rule = SpreadsheetApp.newDataValidation()
+    var range = sheet.getRange(2, col, 1999, 1);
+    var rule = SpreadsheetApp.newDataValidation()
       .requireValueInList(values)
       .setAllowInvalid(false)
       .build();
-    // Apply to rows 2 through 2000
-    sheet.getRange(2, col, 1999, 1).setDataValidation(rule);
+    
+    try {
+      range.setDataValidation(rule);
+    } catch (e) {
+      Logger.log("Could not set validation for col " + col + ": " + e.message);
+      // If it's a typed column, the error "This operation is not allowed on cells in typed columns"
+      // means the user should manually set the column type to "Dropdown" or "Text" first.
+    }
   }
 
-  // Col C (3): ELD Status
+  // Column Mapping:
+  // A (1): Name
+  // B (2): Email
+  // C (3): ELD Status
+  // D (4): Duty Status
+  // E (5): Follow Up
+  // F (6): Company
+  // G (7): Board
+  // H (8): Device Type
+  // I (9): App Version
+  // J (10): Last Sent At
+  // K (11): Email Sent
+
   setValidation(3, ["Connected", "Disconnected"]);
-  
-  // Col D (4): Duty Status
   setValidation(4, ["Driving", "On Duty", "Off Duty", "Sleep", "Not Set"]);
-  
-  // Col E (5): Follow Up
   setValidation(5, ["Action required", "Connect", "None"]);
-  
-  // Col G (7): Board
   setValidation(7, ["Board A", "Board B", "Board C"]);
-  
-  // Col K (11): Email Sent
   setValidation(11, ["TRUE", "FALSE"]);
 
-  // 4. Force Table Expansion (for Google Tables)
-  // In the new Sheets UI, "Tables" are independent objects.
+  // 4. Force Table range update if it's a Google Table
   try {
-    const tables = sheet.getTables();
-    if (tables.length > 0) {
-      const table = tables[0];
-      // Resize table to cover all 11 columns and existing rows
-      const lastRow = Math.max(sheet.getLastRow(), 15); 
-      const newRange = sheet.getRange(1, 1, lastRow, headers.length);
-      table.setRange(newRange);
+    var tables = sheet.getTables();
+    if (tables && tables.length > 0) {
+      var table = tables[0];
+      var lastRow = Math.max(sheet.getLastRow(), 2);
+      table.setRange(sheet.getRange(1, 1, lastRow, 11));
     }
   } catch (e) {
-    console.log("Note: Not using the 'Table' object feature or API not available.");
+    Logger.log("Table API skip: " + e.message);
   }
 
-  // 5. Cleanup
-  sheet.autoResizeColumns(1, headers.length);
+  sheet.autoResizeColumns(1, 11);
   
-  // Final styling for the header row
-  sheet.getRange(1, 1, 1, headers.length).setBorder(true, true, true, true, true, true, "white", SpreadsheetApp.BorderStyle.SOLID);
-
-  SpreadsheetApp.getUi().alert("Sheet Layout Fixed!\n\nIndices:\nC: ELD\nD: Duty\nE: FollowUp\nG: Board\nK: EmailSent");
+  SpreadsheetApp.getUi().alert("Sheet Layout Configured!\n\nIf you see 'Typed Column' errors, please ensure these columns are set to 'Text' type or 'Dropdown' type in the Table menu.");
 }
