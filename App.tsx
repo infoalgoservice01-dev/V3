@@ -10,7 +10,7 @@ import { DriverReplies } from './components/DriverReplies';
 import { AIAssistant } from './components/AIAssistant';
 import { generateComplianceEmail, generateDriverReply } from './services/geminiService';
 import { fetchSheetData, appendDriverToSheet, updateDriverInSheet, clearDriverRow } from './services/sheetService';
-import { sendGmailMessage } from './services/gmailService';
+import { sendGmailMessage, fetchGmailReplies } from './services/gmailService';
 import { Sidebar, SidebarBody, SidebarLink } from './components/ui/sidebar';
 
 const buildFollowUpEmail = (driverName: string) => {
@@ -362,10 +362,33 @@ const App: React.FC = () => {
     return { sentAt };
   };
 
+  const handleRefreshReplies = async () => {
+    if (!user?.accessToken || user.accessToken === 'demo_token') return;
+
+    try {
+      const driverEmails = drivers.map(d => d.email).filter(Boolean);
+      const gmailReplies = await fetchGmailReplies(user.accessToken, driverEmails);
+
+      if (gmailReplies.length > 0) {
+        setDriverReplies(prev => {
+          const merged = [...prev];
+          gmailReplies.forEach(reply => {
+            const exists = merged.some(r => r.id === reply.id);
+            if (!exists) merged.unshift(reply);
+          });
+          return merged;
+        });
+      }
+    } catch (e) {
+      console.error("Failed to refresh Gmail replies:", e);
+    }
+  };
+
   const handleSync = useCallback(async () => {
     if (!sheetConfig.sheetId) return;
     setSyncStatus('syncing');
     try {
+      // Sync Google Sheets Data
       const remoteDrivers = await fetchSheetData(sheetConfig.sheetId, user?.accessToken !== 'demo_token' ? user?.accessToken : undefined);
       setDrivers(prev => {
         const merged = [...prev];
@@ -380,7 +403,6 @@ const App: React.FC = () => {
             merged[idx] = {
               ...local,
               ...remote,
-              // Preservations: If remote field is null, keep local value to avoid "always connected" bug
               eldStatus: remote.eldStatus ?? local.eldStatus,
               dutyStatus: remote.dutyStatus ?? local.dutyStatus,
               followUp: remote.followUp ?? local.followUp,
@@ -394,12 +416,19 @@ const App: React.FC = () => {
         });
         return merged;
       });
+
+      // Also Sync Gmail Replies if in Live Mode
+      if (sheetConfig.isLiveMode) {
+        await handleRefreshReplies();
+      }
+
       setSyncStatus('success');
       setSheetConfig(prev => ({ ...prev, lastSync: new Date().toISOString() }));
     } catch (e) {
       setSyncStatus('error');
+      console.error("Sync Error:", e);
     }
-  }, [sheetConfig.sheetId, user]);
+  }, [sheetConfig, user, drivers]);
 
   const handleUpdateDriver = async (id: string, updates: Partial<Driver>) => {
     let updatedDriver: Driver | undefined;

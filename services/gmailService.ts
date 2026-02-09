@@ -51,3 +51,67 @@ export const sendGmailMessage = async (
     return { ok: false, error: error?.message || 'Network error' };
   }
 };
+
+/**
+ * Fetches recent messages from the user's Gmail inbox and maps them to DriverReply objects.
+ */
+export const fetchGmailReplies = async (
+  accessToken: string,
+  driverEmails: string[]
+): Promise<any[]> => {
+  try {
+    // 1. List recent messages in the inbox
+    const listRes = await fetch(
+      'https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:inbox&maxResults=20',
+      {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      }
+    );
+
+    if (!listRes.ok) return [];
+    const listData = await listRes.json();
+    const messages = listData.messages || [];
+
+    const replies: any[] = [];
+
+    // 2. Fetch details for each message
+    for (const msg of messages) {
+      const detailRes = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`,
+        {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        }
+      );
+
+      if (!detailRes.ok) continue;
+      const detail = await detailRes.json();
+
+      // Extract headers
+      const headers = detail.payload?.headers || [];
+      const fromHeader = headers.find((h: any) => h.name.toLowerCase() === 'from')?.value || '';
+      const dateHeader = headers.find((h: any) => h.name.toLowerCase() === 'date')?.value || '';
+
+      // Parse email from "Name <email@example.com>" or just "email@example.com"
+      const emailMatch = fromHeader.match(/<(.+?)>/) || [null, fromHeader];
+      const senderEmail = emailMatch[1].trim().toLowerCase();
+
+      // Check if this sender is one of our drivers
+      if (driverEmails.map(e => e.toLowerCase()).includes(senderEmail)) {
+        replies.push({
+          id: detail.id,
+          driverId: senderEmail, // We use email as ID for mapping usually
+          driverName: fromHeader.split('<')[0].trim() || senderEmail,
+          timestamp: new Date(dateHeader).toISOString(),
+          message: detail.snippet || '',
+          isRead: !detail.labelIds.includes('UNREAD'),
+          sentiment: undefined // Could be added with Gemini later
+        });
+      }
+    }
+
+    return replies;
+  } catch (error) {
+    console.error('Fetch Gmail Replies Error:', error);
+    return [];
+  }
+};
