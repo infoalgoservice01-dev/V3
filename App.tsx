@@ -197,7 +197,8 @@ const App: React.FC = () => {
 
         setUser(googleUser);
         setAuthUser({ email: data.email, name: data.name, picture: data.picture });
-        alert("Success: Google API Connected!");
+        setSheetConfig(prev => ({ ...prev, isLiveMode: true })); // ✅ Auto-enable Live Mode on login
+        alert("Success: Google API Connected and Live Mode Enabled!");
       } catch (error) {
         console.error("Failed to fetch user info", error);
         alert("Error fetching user info: " + (error instanceof Error ? error.message : "Unknown error"));
@@ -281,6 +282,8 @@ const App: React.FC = () => {
       if (!sentSuccess) throw new Error(res.error || "Gmail API failed to send message.");
     } else {
       console.log("Simulation mode: No real email sent.");
+      alert("Note: App is in SIMULATION MODE. No real email was sent. Connect your Google account or toggle Live Mode ON in the Sync panel.");
+      // In simulation mode, we still "succeed" for UI demo purposes, but we warn the user.
     }
 
     const sentAt = new Date().toISOString();
@@ -413,7 +416,8 @@ const App: React.FC = () => {
           accessToken: token,
           expiry: Date.now() + 3500 * 1000
         });
-        alert("Google Connected Successfully!");
+        setSheetConfig(prev => ({ ...prev, isLiveMode: true })); // ✅ Auto-enable Live Mode
+        alert("Google Connected & Live Mode Enabled!");
       }
     }} />
   );
