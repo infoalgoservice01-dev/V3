@@ -105,9 +105,18 @@ const BrandLogo = ({ open, onToggle, theme, onToggleTheme }: { open: boolean, on
 );
 
 const App: React.FC = () => {
-  const [drivers, setDrivers] = useState<Driver[]>(INITIAL_DRIVERS);
-  const [emailLogs, setEmailLogs] = useState<EmailLogEntry[]>([]);
-  const [driverReplies, setDriverReplies] = useState<DriverReply[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>(() => {
+    const saved = localStorage.getItem('eld_drivers');
+    return saved ? JSON.parse(saved) : INITIAL_DRIVERS;
+  });
+  const [emailLogs, setEmailLogs] = useState<EmailLogEntry[]>(() => {
+    const saved = localStorage.getItem('eld_email_logs');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [driverReplies, setDriverReplies] = useState<DriverReply[]>(() => {
+    const saved = localStorage.getItem('eld_driver_replies');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'replies' | 'ai-assistant'>('dashboard');
   const [isResetting, setIsResetting] = useState(false);
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set());
@@ -157,8 +166,23 @@ const App: React.FC = () => {
       document.documentElement.classList.remove('dark');
     }
     localStorage.setItem('app-theme', theme);
+  }, [theme]);
 
-    // DEBUG CLI: Access via Browser Console
+  // Persist drivers and logs to localStorage on every change
+  useEffect(() => {
+    localStorage.setItem('eld_drivers', JSON.stringify(drivers));
+  }, [drivers]);
+
+  useEffect(() => {
+    localStorage.setItem('eld_email_logs', JSON.stringify(emailLogs));
+  }, [emailLogs]);
+
+  useEffect(() => {
+    localStorage.setItem('eld_driver_replies', JSON.stringify(driverReplies));
+  }, [driverReplies]);
+
+  // DEBUG CLI: Access via Browser Console
+  useEffect(() => {
     (window as any).debug_env = () => {
       const clientId = (window as any).__GOOGLE_CLIENT_ID__;
       alert(
@@ -168,7 +192,7 @@ const App: React.FC = () => {
         `Live: ${sheetConfig.isLiveMode ? 'ON' : 'OFF'}`
       );
     };
-  }, [theme, sheetConfig.isLiveMode]);
+  }, [sheetConfig.isLiveMode]);
 
   useEffect(() => {
     localStorage.setItem('eld_sheet_config', JSON.stringify(sheetConfig));
@@ -518,7 +542,7 @@ const App: React.FC = () => {
         <header className="flex items-center justify-between mb-8">
           <div>
             <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Leader Control</h2>
-            <p className="text-slate-500 text-sm">Welcome back, {authUser.name}</p>
+            <p className="text-slate-500 text-sm">Welcome back, {authUser?.name || 'Guest'}</p>
           </div>
           <button onClick={handleGlobalReset} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold shadow-md hover:bg-indigo-700">
             <Zap className="w-4 h-4" /> Reset All
