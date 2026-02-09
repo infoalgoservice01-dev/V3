@@ -140,7 +140,7 @@ const App: React.FC = () => {
   const [sheetConfig, setSheetConfig] = useState<SheetConfig>(() => {
     const saved = localStorage.getItem('eld_sheet_config');
     return saved ? JSON.parse(saved) : {
-      sheetId: '1jfINaFX2agFliYnaMvKqnh4OlJLS_UF4JWgwqg4muA8',
+      sheetId: '10kXJzrMhRqe_39J_HrqX3RwbhZSa09edS6GPlEBn1BY',
       isAutoSync: true,
       isLiveMode: false,
       isBidirectional: true
@@ -346,7 +346,11 @@ const App: React.FC = () => {
       setDrivers(prev => {
         const merged = [...prev];
         remoteDrivers.forEach(remote => {
-          const idx = merged.findIndex(d => d.id === remote.id || d.email === remote.email);
+          const remoteEmail = (remote.email || "").trim().toLowerCase();
+          const idx = merged.findIndex(d =>
+            d.id === remote.id ||
+            (d.email && d.email.trim().toLowerCase() === remoteEmail)
+          );
           if (idx > -1) {
             const local = merged[idx];
             merged[idx] = {
