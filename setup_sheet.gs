@@ -1,74 +1,84 @@
 /**
- * Fleet Monitor Sheet Initializer
+ * Fleet Monitor Sheet Initializer v2
  * This script configures the Google Sheet to work perfectly with the Leader A1 app.
- * 1. Sets Headers (Column A-K)
- * 2. Adds Data Validation (Dropdowns) for Statuses
- * 3. Populates Initial Data
+ * - Fixes column misalignment
+ * - Adds specific dropdowns for Board A/B/C
+ * - Ensures correct Duty Status options
+ * - Expands table to Column K
+ * - DOES NOT DELETE EXISTING DRIVER NAMES/EMAILS
  */
 function setupFleetMonitorSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheets()[0];
-  sheet.setName("Drivers");
-
-  // 1. Define Headers
+  
+  // 1. Define Headers exactly as the app expects (A-K)
   const headers = [
     "Name", "Email", "ELD Status", "Duty Status", "Follow Up", 
     "Company", "Board", "Device Type", "App Version", 
     "Last Sent At", "Email Sent"
   ];
   
+  // Set headers and format
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold");
+  sheet.getRange(1, 1, 1, headers.length)
+       .setFontWeight("bold")
+       .setBackground("#1e4d3a") // Dark green to match screenshot
+       .setFontColor("white")
+       .setVerticalAlignment("middle");
+  
   sheet.setFrozenRows(1);
 
-  // 2. Clear existing data (optional, but good for a fresh start)
-  if (sheet.getLastRow() > 1) {
-    sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).clearContent();
-  }
+  // 2. Clear OLD validations to fix misalignment
+  // This clears ghost dropdowns from previous attempts
+  sheet.getRange("A:K").clearDataValidations();
 
   // 3. Set up Data Validation (Dropdowns)
   
-  // ELD Status (Col C)
-  const eldRules = SpreadsheetApp.newDataValidation()
-    .requireValueInList(["Connected", "Disconnected"])
-    .setAllowInvalid(false)
-    .build();
-  sheet.getRange("C2:C1000").setDataValidation(eldRules);
+  /** Helper to set dropdowns */
+  function setValidation(col, values) {
+    const rule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(values)
+      .setAllowInvalid(false)
+      .build();
+    // Apply to rows 2 through 2000
+    sheet.getRange(2, col, 1999, 1).setDataValidation(rule);
+  }
 
-  // Duty Status (Col D)
-  const dutyRules = SpreadsheetApp.newDataValidation()
-    .requireValueInList(["Driving", "On Duty", "Off Duty", "Sleep", "Not Set"])
-    .setAllowInvalid(false)
-    .build();
-  sheet.getRange("D2:D1000").setDataValidation(dutyRules);
+  // Col C (3): ELD Status
+  setValidation(3, ["Connected", "Disconnected"]);
+  
+  // Col D (4): Duty Status
+  setValidation(4, ["Driving", "On Duty", "Off Duty", "Sleep", "Not Set"]);
+  
+  // Col E (5): Follow Up
+  setValidation(5, ["Action required", "Connect", "None"]);
+  
+  // Col G (7): Board
+  setValidation(7, ["Board A", "Board B", "Board C"]);
+  
+  // Col K (11): Email Sent
+  setValidation(11, ["TRUE", "FALSE"]);
 
-  // Follow Up Status (Col E)
-  const followRules = SpreadsheetApp.newDataValidation()
-    .requireValueInList(["Action required", "Connect", "None"])
-    .setAllowInvalid(false)
-    .build();
-  sheet.getRange("E2:E1000").setDataValidation(followRules);
-
-  // Email Sent (Col K)
-  const emailSentRules = SpreadsheetApp.newDataValidation()
-    .requireValueInList(["TRUE", "FALSE"])
-    .setAllowInvalid(false)
-    .build();
-  sheet.getRange("K2:K1000").setDataValidation(emailSentRules);
-
-  // 4. Populate Initial Data
-  const initialData = [
-    ["John Miller", "john.m@trucking-co.com", "Connected", "Driving", "None", "Alpha Logistics", "Board A", "Samsung Tab A8", "v4.2.1", "", "FALSE"],
-    ["Sarah Jenkins", "s.jenkins@trucking-co.com", "Disconnected", "Off Duty", "Action required", "Global Freight", "Board B", "iPad Mini 6", "v4.1.9", "2023-10-27T08:30:00Z", "TRUE"],
-    ["Robert Davis", "r.davis@trucking-co.com", "Connected", "On Duty", "None", "Alpha Logistics", "Board A", "Android Tablet", "v4.2.0", "", "FALSE"],
-    ["Michael Chen", "m.chen@trucking-co.com", "Connected", "Sleep", "None", "Rapid Trans", "Board C", "Samsung Tab S7", "v4.2.1", "", "FALSE"],
-    ["Linda Thompson", "l.thompson@trucking-co.com", "Disconnected", "Driving", "Action required", "Global Freight", "Board B", "iPad Air", "v3.8.5", "2023-10-27T09:15:00Z", "TRUE"],
-    ["Kevon Wright", "k.wright@trucking-co.com", "Connected", "On Duty", "None", "Alpha Logistics", "Board C", "Lenovo Tab P11", "v4.0.0", "", "FALSE"]
-  ];
-
-  sheet.getRange(2, 1, initialData.length, initialData[0].length).setValues(initialData);
+  // 4. Force Table Expansion (for Google Tables)
+  // In the new Sheets UI, "Tables" are independent objects.
+  try {
+    const tables = sheet.getTables();
+    if (tables.length > 0) {
+      const table = tables[0];
+      // Resize table to cover all 11 columns and existing rows
+      const lastRow = Math.max(sheet.getLastRow(), 15); 
+      const newRange = sheet.getRange(1, 1, lastRow, headers.length);
+      table.setRange(newRange);
+    }
+  } catch (e) {
+    console.log("Note: Not using the 'Table' object feature or API not available.");
+  }
 
   // 5. Cleanup
   sheet.autoResizeColumns(1, headers.length);
-  SpreadsheetApp.getUi().alert("Sheet successfully configured for Leader A1!");
+  
+  // Final styling for the header row
+  sheet.getRange(1, 1, 1, headers.length).setBorder(true, true, true, true, true, true, "white", SpreadsheetApp.BorderStyle.SOLID);
+
+  SpreadsheetApp.getUi().alert("Sheet Layout Fixed!\n\nIndices:\nC: ELD\nD: Duty\nE: FollowUp\nG: Board\nK: EmailSent");
 }
