@@ -1,15 +1,25 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Driver, DutyStatus, ELDStatus, FollowUpStatus, EmailLogEntry, SheetConfig, SyncStatus, GoogleUser, AuthUser, DriverReply } from './types';
+import { Driver, DutyStatus, ELDStatus, FollowUpStatus, EmailLogEntry, GoogleUser, AuthUser, DriverReply } from './types';
 import { INITIAL_DRIVERS } from './constants';
 import { DriverTable } from './components/DriverTable';
 import { StatsCard } from './components/StatsCard';
-import { SheetSyncControl } from './components/SheetSyncControl';
+import { DatabaseSyncControl } from './components/DatabaseSyncControl';
 import { Login } from './components/Login';
 import { DriverReplies } from './components/DriverReplies';
 import { AIAssistant } from './components/AIAssistant';
 import { generateComplianceEmail, generateDriverReply } from './services/geminiService';
-import { fetchSheetData, appendDriverToSheet, updateDriverInSheet, clearDriverRow } from './services/sheetService';
+import {
+  initializeUserDatabase,
+  subscribeToDrivers,
+  subscribeToEmailLogs,
+  subscribeToDriverReplies,
+  addDriver as addDriverToFirestore,
+  updateDriver as updateDriverInFirestore,
+  deleteDriver as deleteDriverFromFirestore,
+  addEmailLog,
+  addDriverReply
+} from './services/firestoreService';
 import { sendGmailMessage, fetchGmailReplies } from './services/gmailService';
 import { Sidebar, SidebarBody, SidebarLink } from './components/ui/sidebar';
 
@@ -146,17 +156,14 @@ const App: React.FC = () => {
     return parsed;
   });
 
-  const [sheetConfig, setSheetConfig] = useState<SheetConfig>(() => {
-    const saved = localStorage.getItem('eld_sheet_config');
-    return saved ? JSON.parse(saved) : {
-      sheetId: '10kXJzrMhRqe_39J_HrqX3RwbhZSa09edS6GPlEBn1BY',
-      isAutoSync: true,
-      isLiveMode: false,
-      isBidirectional: true
-    };
+  // Database and sync state
+  const [isLiveMode, setIsLiveMode] = useState<boolean>(() => {
+    const saved = localStorage.getItem('eld_live_mode');
+    return saved ? JSON.parse(saved) : false;
   });
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
-  const autoSyncTimer = useRef<number | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<string | undefined>();
+  const [dbConnected, setDbConnected] = useState(false);
 
   // Apply theme and load debugging tools
   useEffect(() => {
@@ -181,6 +188,53 @@ const App: React.FC = () => {
     localStorage.setItem('eld_driver_replies', JSON.stringify(driverReplies));
   }, [driverReplies]);
 
+  // Persist live mode setting
+  useEffect(() => {
+    localStorage.setItem('eld_live_mode', JSON.stringify(isLiveMode));
+  }, [isLiveMode]);
+
+  // Initialize user database and set up Firestore listeners
+  useEffect(() => {
+    if (!user?.uid) {
+      setDbConnected(false);
+      return;
+    }
+
+    // Initialize user database on first login
+    initializeUserDatabase(user.uid, user.email, user.name)
+      .then(() => {
+        setDbConnected(true);
+        console.log('✅ Database connected for user:', user.email);
+      })
+      .catch((err) => {
+        console.error('❌ Database initialization error:', err);
+        setDbConnected(false);
+      });
+
+    // Subscribe to real-time driver updates
+    const unsubDrivers = subscribeToDrivers(user.uid, (firestoreDrivers) => {
+      setDrivers(firestoreDrivers);
+      setLastSync(new Date().toISOString());
+    });
+
+    // Subscribe to real-time email log updates
+    const unsubLogs = subscribeToEmailLogs(user.uid, (firestoreLogs) => {
+      setEmailLogs(firestoreLogs);
+    });
+
+    // Subscribe to real-time driver reply updates
+    const unsubReplies = subscribeToDriverReplies(user.uid, (firestoreReplies) => {
+      setDriverReplies(firestoreReplies);
+    });
+
+    // Cleanup subscriptions on unmount or user change
+    return () => {
+      unsubDrivers();
+      unsubLogs();
+      unsubReplies();
+    };
+  }, [user?.uid]);
+
   // DEBUG CLI: Access via Browser Console
   useEffect(() => {
     (window as any).debug_env = () => {
@@ -189,24 +243,11 @@ const App: React.FC = () => {
         `--- APP DEBUG ---\n` +
         `ID: ${clientId ? 'Valid' : 'MISSING'}\n` +
         `Origin: ${window.location.origin}\n` +
-        `Live: ${sheetConfig.isLiveMode ? 'ON' : 'OFF'}`
+        `Live: ${isLiveMode ? 'ON' : 'OFF'}\n` +
+        `DB: ${dbConnected ? 'Connected' : 'Disconnected'}`
       );
     };
-  }, [sheetConfig.isLiveMode]);
-
-  useEffect(() => {
-    localStorage.setItem('eld_sheet_config', JSON.stringify(sheetConfig));
-  }, [sheetConfig]);
-
-  useEffect(() => {
-    if (authUser) localStorage.setItem('auth_user', JSON.stringify(authUser));
-    else localStorage.removeItem('auth_user');
-  }, [authUser]);
-
-  useEffect(() => {
-    if (user) localStorage.setItem('google_user', JSON.stringify(user));
-    else localStorage.removeItem('google_user');
-  }, [user]);
+  }, [isLiveMode, dbConnected]);
 
   const handleGoogleLogin = useGoogleLogin({
     onSuccess: async (tokenResponse) => {
@@ -301,9 +342,9 @@ const App: React.FC = () => {
     let sentSuccess = true;
     let sentVia: 'Simulation' | 'Gmail API' = 'Simulation';
 
-    console.log(`Email Sending Mode: ${sheetConfig.isLiveMode ? 'LIVE' : 'SIMULATION'}`);
+    console.log(`Email Sending Mode: ${isLiveMode ? 'LIVE' : 'SIMULATION'}`);
 
-    if (sheetConfig.isLiveMode && user?.accessToken && user.accessToken !== 'demo_token') {
+    if (isLiveMode && user?.accessToken && user.accessToken !== 'demo_token') {
       console.log("Triggering Gmail API message to:", driver.email);
       const res = await sendGmailMessage(user.accessToken, driver.email, subject, body);
       sentSuccess = res.ok;
@@ -311,8 +352,7 @@ const App: React.FC = () => {
       if (!sentSuccess) throw new Error(res.error || "Gmail API failed to send message.");
     } else {
       console.log("Simulation mode: No real email sent.");
-      alert("Note: App is in SIMULATION MODE. No real email was sent. Connect your Google account or toggle Live Mode ON in the Sync panel.");
-      // In simulation mode, we still "succeed" for UI demo purposes, but we warn the user.
+      alert("Note: App is in SIMULATION MODE. No real email was sent. Connect your Google account or toggle Live Mode ON in the Database panel.");
     }
 
     const sentAt = new Date().toISOString();
@@ -339,10 +379,10 @@ const App: React.FC = () => {
     setDrivers(prev => prev.map(d => d.id === driver.id ? updatedDriver : d));
     setEmailLogs(prev => [logEntry, ...prev]);
 
-    // Persistence to Google Sheets
-    if (sheetConfig.sheetId && user?.accessToken && user.accessToken !== 'demo_token') {
-      console.log("Persisting update to Google Sheets...");
-      await updateDriverInSheet(sheetConfig.sheetId, updatedDriver, user.accessToken);
+    // Persist to Firestore
+    if (user?.uid) {
+      await updateDriverInFirestore(user.uid, driver.id, updatedDriver);
+      await addEmailLog(user.uid, logEntry);
     }
 
     // Delayed reply simulation
@@ -385,50 +425,13 @@ const App: React.FC = () => {
   };
 
   const handleSync = useCallback(async () => {
-    if (!sheetConfig.sheetId) return;
-    setSyncStatus('syncing');
-    try {
-      // Sync Google Sheets Data
-      const remoteDrivers = await fetchSheetData(sheetConfig.sheetId, user?.accessToken !== 'demo_token' ? user?.accessToken : undefined);
-      setDrivers(prev => {
-        const merged = [...prev];
-        remoteDrivers.forEach(remote => {
-          const remoteEmail = (remote.email || "").trim().toLowerCase();
-          const idx = merged.findIndex(d =>
-            d.id === remote.id ||
-            (d.email && d.email.trim().toLowerCase() === remoteEmail)
-          );
-          if (idx > -1) {
-            const local = merged[idx];
-            merged[idx] = {
-              ...local,
-              ...remote,
-              eldStatus: remote.eldStatus ?? local.eldStatus,
-              dutyStatus: remote.dutyStatus ?? local.dutyStatus,
-              followUp: remote.followUp ?? local.followUp,
-              board: remote.board ?? local.board,
-              company: remote.company || local.company,
-              name: remote.name || local.name
-            };
-          } else {
-            merged.push(remote);
-          }
-        });
-        return merged;
-      });
-
-      // Also Sync Gmail Replies if in Live Mode
-      if (sheetConfig.isLiveMode) {
-        await handleRefreshReplies();
-      }
-
-      setSyncStatus('success');
-      setSheetConfig(prev => ({ ...prev, lastSync: new Date().toISOString() }));
-    } catch (e) {
-      setSyncStatus('error');
-      console.error("Sync Error:", e);
+    // Sync Gmail Replies if in Live Mode
+    if (isLiveMode) {
+      await handleRefreshReplies();
     }
-  }, [sheetConfig, user, drivers]);
+    // Note: Firestore handles real-time sync automatically via listeners
+    setLastSync(new Date().toISOString());
+  }, [isLiveMode, drivers]);
 
   const handleUpdateDriver = async (id: string, updates: Partial<Driver>) => {
     let updatedDriver: Driver | undefined;
@@ -439,18 +442,9 @@ const App: React.FC = () => {
       return newDrivers;
     });
 
-    // Side effect: Persist to sheet AFTER state update is queued
-    if (updatedDriver && sheetConfig.sheetId && sheetConfig.isBidirectional && user?.accessToken && user.accessToken !== 'demo_token') {
-      if (!updatedDriver.sheetRowIndex) {
-        console.warn("Cannot persist: Missing sheetRowIndex. Trying a sync first...");
-        handleSync();
-        return;
-      }
-      console.log(`Syncing update for ${updatedDriver.name} to Row ${updatedDriver.sheetRowIndex}`);
-      updateDriverInSheet(sheetConfig.sheetId, updatedDriver, user.accessToken).catch(err => {
-        console.error("Sheet update failed:", err);
-        alert("Failed to save to Google Sheets. Please ensure you have edit access and are logged in.");
-      });
+    // Persist to Firestore
+    if (updatedDriver && user?.uid) {
+      await updateDriverInFirestore(user.uid, id, updates);
     }
   };
 
@@ -458,28 +452,23 @@ const App: React.FC = () => {
     const newD: Driver = {
       ...data,
       id: Math.random().toString(36).substr(2, 9),
-      emailSent: false,
-      sheetRowIndex: undefined // Will be set by next sync or append
+      emailSent: false
     };
 
     setDrivers(prev => [...prev, newD]);
 
-    // Persist to sheet
-    if (sheetConfig.sheetId && user?.accessToken && user.accessToken !== 'demo_token') {
-      console.log(`Appending new driver ${newD.name} to sheet`);
-      await appendDriverToSheet(sheetConfig.sheetId, newD, user.accessToken);
-      handleSync(); // Refresh indices
+    // Persist to Firestore
+    if (user?.uid) {
+      await addDriverToFirestore(user.uid, newD);
     }
   };
 
   const handleDeleteDriver = async (id: string) => {
-    const driverToDelete = drivers.find(d => d.id === id);
     setDrivers(prev => prev.filter(d => d.id !== id));
 
-    // Persist deletion (clear row) to Google Sheets
-    if (driverToDelete?.sheetRowIndex && sheetConfig.sheetId && user?.accessToken && user.accessToken !== 'demo_token') {
-      console.log(`Clearing row ${driverToDelete.sheetRowIndex} for deleted driver ${driverToDelete.name}`);
-      await clearDriverRow(sheetConfig.sheetId, driverToDelete.sheetRowIndex, user.accessToken);
+    // Persist deletion to Firestore
+    if (user?.uid) {
+      await deleteDriverFromFirestore(user.uid, id);
     }
   };
 
@@ -557,7 +546,13 @@ const App: React.FC = () => {
             </div>
             {sidebarOpen && (
               <div className="mt-8 px-2">
-                <SheetSyncControl config={sheetConfig} status={syncStatus} onUpdateConfig={(u) => setSheetConfig(p => ({ ...p, ...u }))} onSyncNow={handleSync} />
+                <DatabaseSyncControl
+                  isConnected={dbConnected}
+                  isSyncing={isSyncing}
+                  lastSync={lastSync}
+                  isLiveMode={isLiveMode}
+                  onToggleLiveMode={setIsLiveMode}
+                />
               </div>
             )}
           </div>
