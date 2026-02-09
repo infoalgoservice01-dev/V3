@@ -375,7 +375,7 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <select
-                    value={driver.dutyStatus}
+                    value={driver.dutyStatus || DutyStatus.NOT_SET}
                     onChange={(e) => onUpdateDriver(driver.id, { dutyStatus: e.target.value as DutyStatus })}
                     className={`text-sm border-none bg-transparent font-medium focus:ring-2 focus:ring-indigo-500 rounded p-1 dark:text-slate-300`}
                   >
@@ -386,11 +386,11 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <select
-                    value={driver.eldStatus}
+                    value={driver.eldStatus || ELDStatus.CONNECTED}
                     onChange={(e) => onUpdateDriver(driver.id, { eldStatus: e.target.value as ELDStatus })}
-                    className={`text-sm rounded-lg border px-3 py-1 font-semibold ${driver.eldStatus === ELDStatus.CONNECTED
-                      ? 'border-green-200 text-green-700 bg-green-50 dark:border-green-900 dark:text-green-400 dark:bg-green-950/30'
-                      : 'border-red-200 text-red-700 bg-red-50 dark:border-red-900 dark:text-red-400 dark:bg-red-950/30'
+                    className={`text-sm rounded-lg border px-3 py-1 font-semibold ${driver.eldStatus === ELDStatus.DISCONNECTED
+                      ? 'border-red-200 text-red-700 bg-red-50 dark:border-red-900 dark:text-red-400 dark:bg-red-950/30'
+                      : 'border-green-200 text-green-700 bg-green-50 dark:border-green-900 dark:text-green-400 dark:bg-green-950/30'
                       }`}
                   >
                     <option value={ELDStatus.CONNECTED}>Connected</option>

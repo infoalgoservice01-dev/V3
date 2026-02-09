@@ -46,9 +46,9 @@ export interface Driver {
   board: string;
   deviceType: string;
   appVersion: string; // New field for Leader ELD App Version
-  eldStatus: ELDStatus;
-  dutyStatus: DutyStatus;
-  followUp: FollowUpStatus;
+  eldStatus: ELDStatus | null;
+  dutyStatus: DutyStatus | null;
+  followUp: FollowUpStatus | null;
   emailSent: boolean;
   lastEmailTime?: string;
   lastSentAt?: string | null;

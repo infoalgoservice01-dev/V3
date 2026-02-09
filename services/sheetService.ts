@@ -208,15 +208,17 @@ export const updateDriverInSheet = async (sheetIdInput: string, driver: Driver, 
   }
 };
 
-const mapELDStatus = (val: string): ELDStatus => {
-  if (!val) return ELDStatus.CONNECTED;
+const mapELDStatus = (val: string): ELDStatus | null => {
+  if (!val || val.trim() === "") return null;
   const v = val.trim().toLowerCase();
-  if (v === 'disconnected' || v === 'off' || v === 'inactive') return ELDStatus.DISCONNECTED;
+  if (v.includes('disconnected') || v.includes('off') || v.includes('inactive')) return ELDStatus.DISCONNECTED;
+  if (v.includes('connected') || v.includes('on') || v.includes('active')) return ELDStatus.CONNECTED;
   return ELDStatus.CONNECTED;
 };
 
-const mapDutyStatus = (val: string): DutyStatus => {
-  const v = val?.toLowerCase() || '';
+const mapDutyStatus = (val: string): DutyStatus | null => {
+  if (!val || val.trim() === "") return null;
+  const v = val.toLowerCase();
   if (v.includes('driving')) return DutyStatus.DRIVING;
   if (v.includes('on duty') || v.includes('on-duty')) return DutyStatus.ON_DUTY;
   if (v.includes('off duty') || v.includes('off-duty')) return DutyStatus.OFF_DUTY;
@@ -224,8 +226,9 @@ const mapDutyStatus = (val: string): DutyStatus => {
   return DutyStatus.NOT_SET;
 };
 
-const mapFollowUpStatus = (val: string): FollowUpStatus => {
-  const v = val?.toLowerCase() || '';
+const mapFollowUpStatus = (val: string): FollowUpStatus | null => {
+  if (!val || val.trim() === "") return null;
+  const v = val.toLowerCase();
   if (v.includes('action')) return FollowUpStatus.ACTION_REQUIRED;
   if (v.includes('connect')) return FollowUpStatus.CONNECT;
   return FollowUpStatus.NONE;

@@ -348,7 +348,18 @@ const App: React.FC = () => {
         remoteDrivers.forEach(remote => {
           const idx = merged.findIndex(d => d.id === remote.id || d.email === remote.email);
           if (idx > -1) {
-            merged[idx] = { ...merged[idx], ...remote };
+            const local = merged[idx];
+            merged[idx] = {
+              ...local,
+              ...remote,
+              // Preservations: If remote field is null, keep local value to avoid "always connected" bug
+              eldStatus: remote.eldStatus ?? local.eldStatus,
+              dutyStatus: remote.dutyStatus ?? local.dutyStatus,
+              followUp: remote.followUp ?? local.followUp,
+              board: remote.board ?? local.board,
+              company: remote.company || local.company,
+              name: remote.name || local.name
+            };
           } else {
             merged.push(remote);
           }
@@ -363,24 +374,58 @@ const App: React.FC = () => {
   }, [sheetConfig.sheetId, user]);
 
   const handleUpdateDriver = async (id: string, updates: Partial<Driver>) => {
+    let updatedDriver: Driver | undefined;
+
     setDrivers(prev => {
       const newDrivers = prev.map(d => d.id === id ? { ...d, ...updates } : d);
-      const updatedDriver = newDrivers.find(d => d.id === id);
-
-      if (updatedDriver && sheetConfig.sheetId && sheetConfig.isBidirectional && user?.accessToken && user.accessToken !== 'demo_token') {
-        updateDriverInSheet(sheetConfig.sheetId, updatedDriver, user.accessToken).catch(console.error);
-      }
-
+      updatedDriver = newDrivers.find(d => d.id === id);
       return newDrivers;
     });
+
+    // Side effect: Persist to sheet AFTER state update is queued
+    if (updatedDriver && sheetConfig.sheetId && sheetConfig.isBidirectional && user?.accessToken && user.accessToken !== 'demo_token') {
+      if (!updatedDriver.sheetRowIndex) {
+        console.warn("Cannot persist: Missing sheetRowIndex. Trying a sync first...");
+        handleSync();
+        return;
+      }
+      console.log(`Syncing update for ${updatedDriver.name} to Row ${updatedDriver.sheetRowIndex}`);
+      updateDriverInSheet(sheetConfig.sheetId, updatedDriver, user.accessToken).catch(err => {
+        console.error("Sheet update failed:", err);
+        alert("Failed to save to Google Sheets. Please ensure you have edit access and are logged in.");
+      });
+    }
   };
 
-  const handleAddDriver = (data: Omit<Driver, 'id' | 'emailSent'>) => {
-    const newD: Driver = { ...data, id: Math.random().toString(36).substr(2, 9), emailSent: false };
+  const handleAddDriver = async (data: Omit<Driver, 'id' | 'emailSent'>) => {
+    const newD: Driver = {
+      ...data,
+      id: Math.random().toString(36).substr(2, 9),
+      emailSent: false,
+      sheetRowIndex: undefined // Will be set by next sync or append
+    };
+
     setDrivers(prev => [...prev, newD]);
+
+    // Persist to sheet
+    if (sheetConfig.sheetId && user?.accessToken && user.accessToken !== 'demo_token') {
+      console.log(`Appending new driver ${newD.name} to sheet`);
+      await appendDriverToSheet(sheetConfig.sheetId, newD, user.accessToken);
+      handleSync(); // Refresh indices
+    }
   };
 
-  const handleDeleteDriver = (id: string) => setDrivers(prev => prev.filter(d => d.id !== id));
+  const handleDeleteDriver = async (id: string) => {
+    const driverToDelete = drivers.find(d => d.id === id);
+    setDrivers(prev => prev.filter(d => d.id !== id));
+
+    // Note: Google Sheets API doesn't have a simple "delete row" without batchUpdate
+    // For now, we just remove it locally. If user wants sheet deletion, 
+    // we would need to implement a 'deleteRow' in sheetService.
+    if (driverToDelete?.sheetRowIndex && sheetConfig.sheetId && user?.accessToken && user.accessToken !== 'demo_token') {
+      console.log("Sheet row deletion is managed via manual clear or batchUpdate (not implemented in v1)");
+    }
+  };
 
   const handleResetDriver = (id: string) => {
     if (window.confirm("Reset this driver to Connected/Not Set?")) {
