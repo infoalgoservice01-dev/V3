@@ -139,7 +139,12 @@ const App: React.FC = () => {
 
   const [sheetConfig, setSheetConfig] = useState<SheetConfig>(() => {
     const saved = localStorage.getItem('eld_sheet_config');
-    return saved ? JSON.parse(saved) : { sheetId: '', isAutoSync: false, isLiveMode: false, isBidirectional: true };
+    return saved ? JSON.parse(saved) : {
+      sheetId: '1jfINaFX2agFliYnaMvKqnh4OlJLS_UF4JWgwqg4muA8',
+      isAutoSync: true,
+      isLiveMode: false,
+      isBidirectional: true
+    };
   });
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const autoSyncTimer = useRef<number | null>(null);
