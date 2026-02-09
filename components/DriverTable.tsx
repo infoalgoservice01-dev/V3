@@ -356,9 +356,17 @@ export const DriverTable: React.FC<DriverTableProps> = ({
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <span className="text-[10px] font-black text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded uppercase border border-indigo-100 dark:border-indigo-800">
-                    {driver.board}
-                  </span>
+                  <select
+                    value={driver.board}
+                    onChange={(e) => onUpdateDriver(driver.id, { board: e.target.value })}
+                    className="text-[10px] font-black text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded uppercase border border-indigo-100 dark:border-indigo-800 outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                  >
+                    {boards.map(b => (
+                      <option key={b} value={b} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
+                        {b}
+                      </option>
+                    ))}
+                  </select>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50/30 dark:bg-indigo-900/10 px-2 py-1 rounded">

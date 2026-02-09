@@ -80,8 +80,8 @@ const fetchViaApi = async (sheetId: string, token: string): Promise<Driver[]> =>
         dutyStatus: mapDutyStatus(duty),
         followUp: mapFollowUpStatus(follow),
         emailSent: emailSent === 'TRUE',
-        lastSentAt: lastSentAt || null,
-        sheetRowIndex: index + 2 // +1 for 0-index offset, +1 for header row
+        lastSentAt: (lastSentAt && lastSentAt !== "") ? lastSentAt : null,
+        sheetRowIndex: index + 2
       };
     }).filter((d): d is Driver => d !== null);
   } catch (e) {
@@ -140,7 +140,7 @@ const parseCSVToDrivers = (csvText: string): Driver[] => {
       dutyStatus: mapDutyStatus(duty),
       followUp: mapFollowUpStatus(follow),
       emailSent: emailSent === 'TRUE',
-      lastSentAt: lastSentAt || null,
+      lastSentAt: (lastSentAt && lastSentAt !== "") ? lastSentAt : null,
     };
   }).filter((d): d is Driver => d !== null);
 };
@@ -209,8 +209,10 @@ export const updateDriverInSheet = async (sheetIdInput: string, driver: Driver, 
 };
 
 const mapELDStatus = (val: string): ELDStatus => {
-  const v = val?.toLowerCase() || '';
-  return (v.includes('disconnected') || v.includes('off')) ? ELDStatus.DISCONNECTED : ELDStatus.CONNECTED;
+  if (!val) return ELDStatus.CONNECTED;
+  const v = val.trim().toLowerCase();
+  if (v === 'disconnected' || v === 'off' || v === 'inactive') return ELDStatus.DISCONNECTED;
+  return ELDStatus.CONNECTED;
 };
 
 const mapDutyStatus = (val: string): DutyStatus => {
