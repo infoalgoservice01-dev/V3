@@ -18,8 +18,12 @@ import {
   updateDriver as updateDriverInFirestore,
   deleteDriver as deleteDriverFromFirestore,
   addEmailLog,
-  addDriverReply
+  addDriverReply,
+  hasImportedFromSheets,
+  markSheetsImported,
+  bulkAddDrivers
 } from './services/firestoreService';
+import { fetchSheetData } from './services/sheetService';
 import { sendGmailMessage, fetchGmailReplies } from './services/gmailService';
 import { Sidebar, SidebarBody, SidebarLink } from './components/ui/sidebar';
 
@@ -200,16 +204,43 @@ const App: React.FC = () => {
       return;
     }
 
-    // Initialize user database on first login
-    initializeUserDatabase(user.uid, user.email, user.name)
-      .then(() => {
+    const setupDatabase = async () => {
+      try {
+        // Initialize user database on first login
+        const isExistingUser = await initializeUserDatabase(user.uid, user.email, user.name);
         setDbConnected(true);
         console.log('✅ Database connected for user:', user.email);
-      })
-      .catch((err) => {
+
+        // Check if we need to import from Google Sheets (one-time)
+        if (!isExistingUser) {
+          const hasImported = await hasImportedFromSheets(user.uid);
+
+          if (!hasImported) {
+            console.log('📥 First login detected - importing from Google Sheets...');
+            const sheetId = '10kXJzrMhRqe_39J_HrqX3RwbhZSa09edS6GPlEBn1BY'; // Your sheet ID
+
+            try {
+              const sheetDrivers = await fetchSheetData(sheetId, user.accessToken !== 'demo_token' ? user.accessToken : undefined);
+
+              if (sheetDrivers.length > 0) {
+                await bulkAddDrivers(user.uid, sheetDrivers);
+                await markSheetsImported(user.uid);
+                console.log(`✅ Imported ${sheetDrivers.length} drivers from Google Sheets`);
+              }
+            } catch (importErr) {
+              console.warn('⚠️ Could not import from Google Sheets (sheet may be private or empty):', importErr);
+              // Mark as imported anyway to avoid retrying on every login
+              await markSheetsImported(user.uid);
+            }
+          }
+        }
+      } catch (err) {
         console.error('❌ Database initialization error:', err);
         setDbConnected(false);
-      });
+      }
+    };
+
+    setupDatabase();
 
     // Subscribe to real-time driver updates
     const unsubDrivers = subscribeToDrivers(user.uid, (firestoreDrivers) => {
@@ -233,7 +264,7 @@ const App: React.FC = () => {
       unsubLogs();
       unsubReplies();
     };
-  }, [user?.uid]);
+  }, [user?.uid, user?.accessToken]);
 
   // DEBUG CLI: Access via Browser Console
   useEffect(() => {
@@ -384,20 +415,6 @@ const App: React.FC = () => {
       await updateDriverInFirestore(user.uid, driver.id, updatedDriver);
       await addEmailLog(user.uid, logEntry);
     }
-
-    // Delayed reply simulation
-    setTimeout(async () => {
-      const replyText = await generateDriverReply(driver.name, body);
-      const reply: DriverReply = {
-        id: Math.random().toString(36).substr(2, 9),
-        driverId: driver.id,
-        driverName: driver.name,
-        timestamp: new Date().toISOString(),
-        message: replyText,
-        isRead: false
-      };
-      setDriverReplies(prev => [reply, ...prev]);
-    }, 5000 + Math.random() * 5000);
 
     return { sentAt };
   };

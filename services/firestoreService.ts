@@ -25,10 +25,33 @@ export const initializeUserDatabase = async (userId: string, userEmail: string, 
         await setDoc(userRef, {
             email: userEmail,
             name: userName,
-            createdAt: Timestamp.now()
+            createdAt: Timestamp.now(),
+            hasImportedFromSheets: false
         });
         console.log(`✅ User database initialized for ${userEmail}`);
     }
+
+    return userSnap.exists();
+};
+
+/**
+ * Check if user has already imported data from Google Sheets
+ */
+export const hasImportedFromSheets = async (userId: string): Promise<boolean> => {
+    const userRef = doc(db, 'users', userId);
+    const userSnap = await getDoc(userRef);
+    return userSnap.exists() && userSnap.data()?.hasImportedFromSheets === true;
+};
+
+/**
+ * Mark that user has imported data from Google Sheets
+ */
+export const markSheetsImported = async (userId: string) => {
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, {
+        hasImportedFromSheets: true,
+        importedAt: Timestamp.now()
+    });
 };
 
 /**
@@ -54,6 +77,14 @@ export const addDriver = async (userId: string, driver: Driver) => {
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now()
     });
+};
+
+/**
+ * Bulk add drivers (for Google Sheets import)
+ */
+export const bulkAddDrivers = async (userId: string, drivers: Driver[]) => {
+    const promises = drivers.map(driver => addDriver(userId, driver));
+    await Promise.all(promises);
 };
 
 /**
