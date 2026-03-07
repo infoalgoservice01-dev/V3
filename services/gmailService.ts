@@ -6,17 +6,52 @@ export const sendGmailMessage = async (
   accessToken: string,
   to: string,
   subject: string,
-  body: string
+  body: string,
+  attachments?: { name: string; type: string; base64: string }[]
 ): Promise<{ ok: boolean; error?: string }> => {
   const utf8Subject = `=?utf-8?B?${btoa(unescape(encodeURIComponent(subject)))}?=`;
-  const messageParts = [
-    `To: ${to}`,
-    'Content-Type: text/plain; charset=utf-8',
-    'MIME-Version: 1.0',
-    `Subject: ${utf8Subject}`,
-    '',
-    body,
-  ];
+  const boundary = `====_Boundary_${Date.now()}_====`;
+
+  let messageParts: string[] = [];
+
+  if (attachments && attachments.length > 0) {
+    messageParts = [
+      `To: ${to}`,
+      `Subject: ${utf8Subject}`,
+      'MIME-Version: 1.0',
+      `Content-Type: multipart/mixed; boundary="${boundary}"`,
+      '',
+      `--${boundary}`,
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      body,
+      ''
+    ];
+
+    attachments.forEach(file => {
+      messageParts.push(
+        `--${boundary}`,
+        `Content-Type: ${file.type}; name="${file.name}"`,
+        `Content-Disposition: attachment; filename="${file.name}"`,
+        'Content-Transfer-Encoding: base64',
+        '',
+        file.base64,
+        ''
+      );
+    });
+
+    messageParts.push(`--${boundary}--`);
+  } else {
+    messageParts = [
+      `To: ${to}`,
+      'Content-Type: text/plain; charset=utf-8',
+      'MIME-Version: 1.0',
+      `Subject: ${utf8Subject}`,
+      '',
+      body,
+    ];
+  }
+
   const message = messageParts.join('\n');
 
   // The message needs to be base64url encoded

@@ -25,6 +25,7 @@ export interface EmailLogEntry {
   timestamp: string;
   statusAtTime: DutyStatus;
   content: string;
+  type?: '3_day_reminder' | '5_day_reminder' | 'custom' | string;
   sentVia?: 'Simulation' | 'Gmail API';
 }
 
@@ -54,6 +55,10 @@ export interface Driver {
   lastSentAt?: string | null;
   hasPendingAlert?: boolean;
   sheetRowIndex?: number;
+  lastProfileReminderAt?: string;
+  lastPFUpdate?: string | null;
+  last3DayEmail?: string | null;
+  last5DayEmail?: string | null;
 }
 
 export type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';

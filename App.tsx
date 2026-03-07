@@ -8,6 +8,9 @@ import { DatabaseSyncControl } from './components/DatabaseSyncControl';
 import { Login } from './components/Login';
 import { DriverReplies } from './components/DriverReplies';
 import { AIAssistant } from './components/AIAssistant';
+import { ProfileForm } from './components/ProfileForm';
+import { Dashboard } from './components/Dashboard';
+import { CustomEmail } from './components/CustomEmail';
 import { generateComplianceEmail, generateDriverReply } from './services/geminiService';
 import {
   initializeUserDatabase,
@@ -62,7 +65,9 @@ import {
   User,
   LogIn,
   LogOut,
-  Zap
+  Zap,
+  RefreshCw,
+  Send
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGoogleLogin } from '@react-oauth/google';
@@ -131,7 +136,7 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('eld_driver_replies');
     return saved ? JSON.parse(saved) : [];
   });
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'replies' | 'ai-assistant'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'connection' | 'history' | 'replies' | 'ai-assistant' | 'profile-form' | 'custom-email'>('dashboard');
   const [isResetting, setIsResetting] = useState(false);
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set());
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -298,7 +303,7 @@ const App: React.FC = () => {
 
         setUser(googleUser);
         setAuthUser({ email: data.email, name: data.name, picture: data.picture });
-        setSheetConfig(prev => ({ ...prev, isLiveMode: true })); // ✅ Auto-enable Live Mode on login
+        setIsLiveMode(true); // ✅ Auto-enable Live Mode on login
         alert("Success: Google API Connected and Live Mode Enabled!");
       } catch (error) {
         console.error("Failed to fetch user info", error);
@@ -419,6 +424,106 @@ const App: React.FC = () => {
     return { sentAt };
   };
 
+  const handleProfileFormReminder = async (driverId: string, days: 3 | 5) => {
+    const driver = drivers.find(d => d.id === driverId);
+    if (!driver) throw new Error('Driver not found');
+
+    const subject = `Profile Form Update Required - ${days} Days Pending`;
+    const body =
+      `Hi ${driver.name},\n\n` +
+      `This is a reminder that your profile form has not been updated for ${days} days.\n` +
+      `Please log in to the portal and update your profile form as soon as possible.\n\n` +
+      `Thank you.`;
+
+    let sentSuccess = true;
+    let sentVia: 'Simulation' | 'Gmail API' = 'Simulation';
+
+    if (isLiveMode && user?.accessToken && user.accessToken !== 'demo_token') {
+      const res = await sendGmailMessage(user.accessToken, driver.email, subject, body);
+      sentSuccess = res.ok;
+      sentVia = 'Gmail API';
+      if (!sentSuccess) throw new Error(res.error || "Gmail API failed to send message.");
+    } else {
+      alert("Note: App is in SIMULATION MODE. No real email was sent. Toggle Live Mode ON.");
+    }
+
+    const sentAt = new Date().toISOString();
+
+    // Update Driver State explicitly with particular email 
+    const updatePayload: Partial<Driver> = {
+      lastProfileReminderAt: sentAt
+    };
+    if (days === 3) updatePayload.last3DayEmail = sentAt;
+    if (days === 5) updatePayload.last5DayEmail = sentAt;
+
+    const updatedDriver = { ...driver, ...updatePayload };
+    setDrivers(prev => prev.map(d => d.id === driver.id ? updatedDriver : d));
+
+    // Add logs
+    const logEntry: EmailLogEntry = {
+      id: Math.random().toString(36).substr(2, 9),
+      driverId: driver.id,
+      driverName: driver.name,
+      timestamp: sentAt,
+      statusAtTime: driver.dutyStatus || DutyStatus.NOT_SET,
+      content: body,
+      sentVia
+    };
+
+    setEmailLogs(prev => [logEntry, ...prev]);
+
+    if (user?.uid) {
+      await updateDriverInFirestore(user.uid, driver.id, updatePayload);
+      await addEmailLog(user.uid, logEntry);
+    }
+  };
+
+  const handleUpdatePFDate = async (driverId: string, dateStr: string) => {
+    const driver = drivers.find(d => d.id === driverId);
+    if (!driver) return;
+
+    const updatePayload = { lastPFUpdate: dateStr };
+    setDrivers(prev => prev.map(d => d.id === driverId ? { ...d, ...updatePayload } : d));
+
+    if (user?.uid) {
+      await updateDriverInFirestore(user.uid, driverId, updatePayload);
+    }
+  };
+
+  const handleCustomEmail = async (driverId: string, subject: string, body: string, attachments: { name: string; type: string; base64: string }[]) => {
+    const driver = drivers.find(d => d.id === driverId);
+    if (!driver || !driver.email) throw new Error("Driver not found or missing email.");
+
+    let sentSuccess = false;
+    let sentVia: 'Simulation' | 'Gmail API' = 'Simulation';
+
+    if (isLiveMode && user?.accessToken && user.accessToken !== 'demo_token') {
+      const res = await sendGmailMessage(user.accessToken, driver.email, subject, body, attachments);
+      sentSuccess = res.ok;
+      sentVia = 'Gmail API';
+      if (!sentSuccess) throw new Error(res.error || "Gmail API failed to send custom email.");
+    } else {
+      console.log(`Simulated Email w/ ${attachments.length} attachments to ${driver.email}`);
+    }
+
+    const logEntry: EmailLogEntry = {
+      id: crypto.randomUUID(),
+      driverId: driver.id,
+      driverName: driver.name,
+      timestamp: new Date().toISOString(),
+      statusAtTime: driver.dutyStatus || DutyStatus.NOT_SET,
+      content: `SUBJECT: ${subject}\n\n${body}`,
+      type: 'custom',
+      sentVia
+    };
+
+    setEmailLogs(prev => [logEntry, ...prev]);
+
+    if (user?.uid) {
+      await addEmailLog(user.uid, logEntry);
+    }
+  };
+
   const handleRefreshReplies = async () => {
     if (!user?.accessToken || user.accessToken === 'demo_token') return;
 
@@ -480,6 +585,21 @@ const App: React.FC = () => {
     }
   };
 
+  const handleBulkAddDrivers = async (dataList: Omit<Driver, 'id' | 'emailSent'>[]) => {
+    const newDrivers = dataList.map(data => ({
+      ...data,
+      id: Math.random().toString(36).substr(2, 9),
+      emailSent: false
+    }));
+
+    setDrivers(prev => [...prev, ...newDrivers]);
+
+    // Persist to Firestore
+    if (user?.uid) {
+      await bulkAddDrivers(user.uid, newDrivers);
+    }
+  };
+
   const handleDeleteDriver = async (id: string) => {
     setDrivers(prev => prev.filter(d => d.id !== id));
 
@@ -528,7 +648,7 @@ const App: React.FC = () => {
           accessToken: token,
           expiry: Date.now() + 3500 * 1000
         });
-        setSheetConfig(prev => ({ ...prev, isLiveMode: true })); // ✅ Auto-enable Live Mode
+        setIsLiveMode(true); // ✅ Auto-enable Live Mode
         alert("Google Connected & Live Mode Enabled!");
       }
     }} />
@@ -557,8 +677,10 @@ const App: React.FC = () => {
             </div>
             <div className="space-y-1 px-1">
               <SidebarLink label="Dashboard" icon={<LayoutDashboard className="w-5 h-5" />} active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+              <SidebarLink label="Connection" icon={<Wifi className="w-5 h-5" />} active={activeTab === 'connection'} onClick={() => setActiveTab('connection')} />
+              <SidebarLink label="Profile Form" icon={<FileText className="w-5 h-5" />} active={activeTab === 'profile-form'} onClick={() => setActiveTab('profile-form')} />
+              <SidebarLink label="Custom Email" icon={<Send className="w-5 h-5" />} active={activeTab === 'custom-email'} onClick={() => setActiveTab('custom-email')} />
               <SidebarLink label="AI Assistant" icon={<Sparkles className="w-5 h-5" />} active={activeTab === 'ai-assistant'} onClick={() => setActiveTab('ai-assistant')} />
-              <SidebarLink label="Replies" icon={<MessageSquare className="w-5 h-5" />} active={activeTab === 'replies'} onClick={() => setActiveTab('replies')} />
               <SidebarLink label="History" icon={<TrendingUp className="w-5 h-5" />} active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
             </div>
             {sidebarOpen && (
@@ -590,7 +712,9 @@ const App: React.FC = () => {
           </button>
         </header>
 
-        {activeTab === 'dashboard' && (
+        {activeTab === 'dashboard' && <Dashboard drivers={drivers} />}
+
+        {activeTab === 'connection' && (
           <div className="space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               <StatsCard title="Drivers" value={stats.total} icon={<ShieldCheck className="w-6 h-6 text-blue-500" />} color="bg-blue-50 dark:bg-blue-900/20" />
@@ -604,6 +728,7 @@ const App: React.FC = () => {
                 setFilters={{ setSearchQuery, setEldFilter, setDutyFilter, setCompanyFilter, setBoardFilter }}
                 onUpdateDriver={handleUpdateDriver}
                 onAddDriver={handleAddDriver}
+                onBulkAddDrivers={handleBulkAddDrivers}
                 onDeleteDriver={handleDeleteDriver}
                 onManualSendEmail={handleManualSendEmail}
                 onResetDriver={handleResetDriver}
@@ -612,7 +737,8 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'replies' && <DriverReplies replies={driverReplies} onMarkRead={(id) => setDriverReplies(prev => prev.map(r => r.id === id ? { ...r, isRead: true } : r))} />}
+        {activeTab === 'profile-form' && <ProfileForm drivers={drivers} emailLogs={emailLogs} onSendReminder={handleProfileFormReminder} onUpdatePFDate={handleUpdatePFDate} />}
+        {activeTab === 'custom-email' && <CustomEmail drivers={drivers} onSendCustomEmail={handleCustomEmail} />}
         {activeTab === 'ai-assistant' && <AIAssistant />}
         {activeTab === 'history' && (
           <div className="space-y-4">
