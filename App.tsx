@@ -11,6 +11,7 @@ import { AIAssistant } from './components/AIAssistant';
 import { ProfileForm } from './components/ProfileForm';
 import { Dashboard } from './components/Dashboard';
 import { CustomEmail } from './components/CustomEmail';
+import { EmailBroadcast } from './components/EmailBroadcast';
 import { generateComplianceEmail, generateDriverReply } from './services/geminiService';
 import {
   initializeUserDatabase,
@@ -28,7 +29,9 @@ import {
 } from './services/firestoreService';
 import { fetchSheetData } from './services/sheetService';
 import { sendGmailMessage, fetchGmailReplies } from './services/gmailService';
-import { Sidebar, SidebarBody, SidebarLink } from './components/ui/sidebar';
+import { MenuBar } from './components/ui/glow-menu';
+import { AnimatedText } from './components/ui/animated-text';
+import { HeroBackground } from './components/ui/shape-landing-hero';
 
 const buildFollowUpEmail = (driverName: string) => {
   const subject = `ELD Disconnected – Action Required`;
@@ -136,10 +139,9 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('eld_driver_replies');
     return saved ? JSON.parse(saved) : [];
   });
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'connection' | 'history' | 'replies' | 'ai-assistant' | 'profile-form' | 'custom-email'>('dashboard');
+  const [activeTab, setActiveTab] = useState('Dashboard');
   const [isResetting, setIsResetting] = useState(false);
   const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set());
-  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('app-theme');
@@ -150,12 +152,21 @@ const App: React.FC = () => {
   const [eldFilter, setEldFilter] = useState<ELDStatus | 'ALL'>('ALL');
   const [dutyFilter, setDutyFilter] = useState<DutyStatus | 'ALL'>('ALL');
   const [companyFilter, setCompanyFilter] = useState<string | 'ALL'>('ALL');
-  const [boardFilter, setBoardFilter] = useState<string | 'ALL'>('ALL');
+  const [boardFilter, setBoardFilter] = useState<string | 'ALL'>(() => {
+    // On initial load, respect the stored authUser's assigned board if present.
+    const saved = localStorage.getItem('auth_user');
+    if (saved) {
+      const parsed: AuthUser = JSON.parse(saved);
+      if (parsed.assignedBoard) return parsed.assignedBoard;
+    }
+    return 'ALL';
+  });
 
   const [authUser, setAuthUser] = useState<AuthUser | null>(() => {
     const saved = localStorage.getItem('auth_user');
     return saved ? JSON.parse(saved) : null;
   });
+
 
   const [user, setUser] = useState<GoogleUser | null>(() => {
     const saved = localStorage.getItem('google_user');
@@ -174,7 +185,7 @@ const App: React.FC = () => {
   const [lastSync, setLastSync] = useState<string | undefined>();
   const [dbConnected, setDbConnected] = useState(false);
 
-  // Apply theme and load debugging tools
+  // Persist theme
   useEffect(() => {
     if (theme === 'dark') {
       document.documentElement.classList.add('dark');
@@ -183,6 +194,15 @@ const App: React.FC = () => {
     }
     localStorage.setItem('app-theme', theme);
   }, [theme]);
+
+  // Persist authUser so board restrictions survive page reloads
+  useEffect(() => {
+    if (authUser) {
+      localStorage.setItem('auth_user', JSON.stringify(authUser));
+    } else {
+      localStorage.removeItem('auth_user');
+    }
+  }, [authUser]);
 
   // Persist drivers and logs to localStorage on every change
   useEffect(() => {
@@ -204,7 +224,8 @@ const App: React.FC = () => {
 
   // Initialize user database and set up Firestore listeners
   useEffect(() => {
-    if (!user?.uid) {
+    const activeUid = user?.uid || authUser?.uid;
+    if (!activeUid) {
       setDbConnected(false);
       return;
     }
@@ -212,13 +233,15 @@ const App: React.FC = () => {
     const setupDatabase = async () => {
       try {
         // Initialize user database on first login
-        const isExistingUser = await initializeUserDatabase(user.uid, user.email, user.name);
+        const activeEmail = user?.email || authUser?.email || '';
+        const activeName = user?.name || authUser?.name || '';
+        const isExistingUser = await initializeUserDatabase(activeUid, activeEmail, activeName);
         setDbConnected(true);
-        console.log('✅ Database connected for user:', user.email);
+        console.log('✅ Database connected for user:', activeEmail);
 
         // Check if we need to import from Google Sheets (one-time)
-        if (!isExistingUser) {
-          const hasImported = await hasImportedFromSheets(user.uid);
+        if (!isExistingUser && user?.accessToken) {
+          const hasImported = await hasImportedFromSheets(activeUid);
 
           if (!hasImported) {
             console.log('📥 First login detected - importing from Google Sheets...');
@@ -228,14 +251,14 @@ const App: React.FC = () => {
               const sheetDrivers = await fetchSheetData(sheetId, user.accessToken !== 'demo_token' ? user.accessToken : undefined);
 
               if (sheetDrivers.length > 0) {
-                await bulkAddDrivers(user.uid, sheetDrivers);
-                await markSheetsImported(user.uid);
+                await bulkAddDrivers(activeUid, sheetDrivers);
+                await markSheetsImported(activeUid);
                 console.log(`✅ Imported ${sheetDrivers.length} drivers from Google Sheets`);
               }
             } catch (importErr) {
               console.warn('⚠️ Could not import from Google Sheets (sheet may be private or empty):', importErr);
               // Mark as imported anyway to avoid retrying on every login
-              await markSheetsImported(user.uid);
+              await markSheetsImported(activeUid);
             }
           }
         }
@@ -248,18 +271,18 @@ const App: React.FC = () => {
     setupDatabase();
 
     // Subscribe to real-time driver updates
-    const unsubDrivers = subscribeToDrivers(user.uid, (firestoreDrivers) => {
+    const unsubDrivers = subscribeToDrivers(activeUid, (firestoreDrivers) => {
       setDrivers(firestoreDrivers);
       setLastSync(new Date().toISOString());
     });
 
     // Subscribe to real-time email log updates
-    const unsubLogs = subscribeToEmailLogs(user.uid, (firestoreLogs) => {
+    const unsubLogs = subscribeToEmailLogs(activeUid, (firestoreLogs) => {
       setEmailLogs(firestoreLogs);
     });
 
     // Subscribe to real-time driver reply updates
-    const unsubReplies = subscribeToDriverReplies(user.uid, (firestoreReplies) => {
+    const unsubReplies = subscribeToDriverReplies(activeUid, (firestoreReplies) => {
       setDriverReplies(firestoreReplies);
     });
 
@@ -269,7 +292,7 @@ const App: React.FC = () => {
       unsubLogs();
       unsubReplies();
     };
-  }, [user?.uid, user?.accessToken]);
+  }, [user?.uid, user?.accessToken, authUser?.uid]);
 
   // DEBUG CLI: Access via Browser Console
   useEffect(() => {
@@ -318,8 +341,23 @@ const App: React.FC = () => {
   });
 
   const handleLogout = () => {
+    // Reset ALL user state
     setAuthUser(null);
     setUser(null);
+    // Reset ALL filter states so the next login starts fresh
+    setBoardFilter('ALL');
+    setCompanyFilter('ALL');
+    setEldFilter('ALL');
+    setDutyFilter('ALL');
+    setSearchQuery('');
+    setIsLiveMode(false);
+    // Clear ALL registered localStorage keys so no data leaks between accounts
+    localStorage.removeItem('auth_user');
+    localStorage.removeItem('google_user');
+    localStorage.removeItem('eld_drivers');
+    localStorage.removeItem('eld_email_logs');
+    localStorage.removeItem('eld_driver_replies');
+    localStorage.removeItem('eld_live_mode');
   };
 
   const filteredDrivers = useMemo(() => {
@@ -328,10 +366,15 @@ const App: React.FC = () => {
       const matchesEld = eldFilter === 'ALL' || driver.eldStatus === eldFilter;
       const matchesDuty = dutyFilter === 'ALL' || driver.dutyStatus === dutyFilter;
       const matchesCompany = companyFilter === 'ALL' || driver.company === companyFilter;
-      const matchesBoard = boardFilter === 'ALL' || driver.board === boardFilter;
+      
+      // Strict RBAC Override: If authUser is assigned to a specific board, forcefully filter it
+      const matchesBoard = (authUser?.assignedBoard)
+        ? driver.board === authUser.assignedBoard
+        : (boardFilter === 'ALL' || driver.board === boardFilter);
+        
       return matchesName && matchesEld && matchesDuty && matchesCompany && matchesBoard;
     });
-  }, [drivers, searchQuery, eldFilter, dutyFilter, companyFilter, boardFilter]);
+  }, [drivers, searchQuery, eldFilter, dutyFilter, companyFilter, boardFilter, authUser]);
 
   const stats = useMemo(() => {
     const violations = filteredDrivers.filter(d => d.eldStatus === ELDStatus.DISCONNECTED && [DutyStatus.DRIVING, DutyStatus.ON_DUTY].includes(d.dutyStatus)).length;
@@ -637,9 +680,59 @@ const App: React.FC = () => {
 
   const toggleTheme = () => setTheme(v => v === 'light' ? 'dark' : 'light');
 
+  const menuItems = [
+    {
+      icon: LayoutDashboard,
+      label: "Dashboard",
+      href: "#",
+      gradient: "radial-gradient(circle, rgba(59,130,246,0.15) 0%, rgba(37,99,235,0.06) 50%, rgba(29,78,216,0) 100%)",
+      iconColor: "text-blue-500",
+    },
+    {
+      icon: Wifi,
+      label: "Connection",
+      href: "#",
+      gradient: "radial-gradient(circle, rgba(34,197,94,0.15) 0%, rgba(22,163,74,0.06) 50%, rgba(21,128,61,0) 100%)",
+      iconColor: "text-green-500",
+    },
+    {
+      icon: FileText,
+      label: "Profile Form",
+      href: "#",
+      gradient: "radial-gradient(circle, rgba(249,115,22,0.15) 0%, rgba(234,88,12,0.06) 50%, rgba(194,65,12,0) 100%)",
+      iconColor: "text-orange-500",
+    },
+    {
+      icon: Sparkles,
+      label: "AI Assistant",
+      href: "#",
+      gradient: "radial-gradient(circle, rgba(168,85,247,0.15) 0%, rgba(147,51,234,0.06) 50%, rgba(126,34,206,0) 100%)",
+      iconColor: "text-purple-500",
+    },
+    {
+      icon: TrendingUp,
+      label: "History",
+      href: "#",
+      gradient: "radial-gradient(circle, rgba(239,68,68,0.15) 0%, rgba(220,38,38,0.06) 50%, rgba(185,28,28,0) 100%)",
+      iconColor: "text-red-500",
+    },
+    {
+      icon: Mail,
+      label: "Broadcast",
+      href: "#",
+      gradient: "radial-gradient(circle, rgba(244,63,94,0.15) 0%, rgba(225,29,72,0.06) 50%, rgba(159,18,57,0) 100%)",
+      iconColor: "text-rose-500",
+    },
+  ];
+
   if (!authUser) return (
     <Login onLogin={(u, token) => {
       setAuthUser(u);
+      // Immediately lock the UI board filter to their assignment on login
+      if (u.assignedBoard) {
+          setBoardFilter(u.assignedBoard);
+      }
+      
       if (token) {
         setUser({
           email: u.email,
@@ -649,72 +742,72 @@ const App: React.FC = () => {
           expiry: Date.now() + 3500 * 1000
         });
         setIsLiveMode(true); // ✅ Auto-enable Live Mode
-        alert("Google Connected & Live Mode Enabled!");
       }
     }} />
   );
 
   return (
-    <div className="flex h-screen bg-slate-50 dark:bg-slate-950 overflow-hidden transition-colors">
-      <Sidebar open={sidebarOpen} setOpen={setSidebarOpen}>
-        <SidebarBody className="flex flex-col h-full bg-slate-900 border-r border-slate-800">
-          <div className="flex flex-col flex-1">
-            <BrandLogo open={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} theme={theme} onToggleTheme={toggleTheme} />
-            <div className="mb-8 px-2">
-              {!user ? (
-                <button onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-2 px-3 py-3 bg-white text-slate-900 rounded-xl font-bold text-xs hover:bg-slate-100 transition-all shadow-lg active:scale-95">
-                  <LogIn className="w-4 h-4 text-indigo-600" />
-                  {sidebarOpen && "Connect Google"}
-                </button>
+    <div className="flex flex-col h-screen bg-slate-50 dark:bg-transparent overflow-hidden transition-colors relative">
+      <div className="hidden dark:block absolute inset-0 -z-20 pointer-events-none overflow-hidden">
+        <HeroBackground />
+      </div>
+      
+      <header className="flex-none flex items-center justify-between px-6 py-4 bg-white dark:bg-slate-900/60 backdrop-blur-md border-b border-slate-200 dark:border-slate-800/60 z-50 shadow-sm relative">
+        <div className="flex items-center gap-6">
+          <BrandLogo open={true} onToggle={() => {}} theme={theme} onToggleTheme={toggleTheme} />
+        </div>
+
+        <div className="flex items-center gap-4">
+          <DatabaseSyncControl
+            isConnected={dbConnected}
+            isSyncing={isSyncing}
+            lastSync={lastSync}
+            isLiveMode={isLiveMode}
+            onToggleLiveMode={setIsLiveMode}
+          />
+           {!user ? (
+            <button onClick={handleGoogleLogin} className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-slate-800 text-indigo-700 dark:text-white rounded-xl font-bold text-xs hover:bg-indigo-100 transition-all shadow-sm active:scale-95">
+              <LogIn className="w-4 h-4 text-indigo-600" />
+              Connect Google
+            </button>
+          ) : (
+            <div className="flex items-center gap-4">
+              <div className="hidden md:flex flex-col items-end pt-1">
+                <AnimatedText text={user.name} textClassName="text-sm tracking-tight text-slate-800 dark:text-white" underlineGradient="from-indigo-400 via-purple-400 to-pink-400" underlineHeight="h-0.5" underlineOffset="-bottom-1" />
+                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1 mt-1">
+                  <CheckCircle2 className="w-3 h-3" /> API Connect
+                </p>
+              </div>
+              {user.picture ? (
+                <img src={user.picture} alt="Profile" className="w-10 h-10 rounded-full border-2 border-slate-200 dark:border-slate-700" />
               ) : (
-                <div className="bg-slate-800 rounded-xl p-3 border border-slate-700">
-                  <p className="text-xs font-bold text-white truncate">{user.name}</p>
-                  <p className="text-[10px] text-green-400 font-bold flex items-center gap-1 mt-1">
-                    <CheckCircle2 className="w-3 h-3" /> API Connect
-                  </p>
+                <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center border-2 border-indigo-200 dark:border-indigo-800">
+                  <User className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                 </div>
               )}
+              <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 mx-1"></div>
+              <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500 rounded-lg transition-colors bg-slate-100 dark:bg-slate-800/50 hover:bg-red-50 dark:hover:bg-red-900/20" title="Sign Out">
+                <LogOut className="w-5 h-5" />
+              </button>
             </div>
-            <div className="space-y-1 px-1">
-              <SidebarLink label="Dashboard" icon={<LayoutDashboard className="w-5 h-5" />} active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-              <SidebarLink label="Connection" icon={<Wifi className="w-5 h-5" />} active={activeTab === 'connection'} onClick={() => setActiveTab('connection')} />
-              <SidebarLink label="Profile Form" icon={<FileText className="w-5 h-5" />} active={activeTab === 'profile-form'} onClick={() => setActiveTab('profile-form')} />
-              <SidebarLink label="Custom Email" icon={<Send className="w-5 h-5" />} active={activeTab === 'custom-email'} onClick={() => setActiveTab('custom-email')} />
-              <SidebarLink label="AI Assistant" icon={<Sparkles className="w-5 h-5" />} active={activeTab === 'ai-assistant'} onClick={() => setActiveTab('ai-assistant')} />
-              <SidebarLink label="History" icon={<TrendingUp className="w-5 h-5" />} active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
-            </div>
-            {sidebarOpen && (
-              <div className="mt-8 px-2">
-                <DatabaseSyncControl
-                  isConnected={dbConnected}
-                  isSyncing={isSyncing}
-                  lastSync={lastSync}
-                  isLiveMode={isLiveMode}
-                  onToggleLiveMode={setIsLiveMode}
-                />
-              </div>
-            )}
-          </div>
-          <div className="mt-auto px-1 pb-4">
-            <SidebarLink label="Sign Out" icon={<LogOut className="w-5 h-5 text-red-400" />} onClick={handleLogout} />
-          </div>
-        </SidebarBody>
-      </Sidebar>
+          )}
+        </div>
+      </header>
 
-      <main className="flex-1 overflow-y-auto p-4 md:p-8">
-        <header className="flex items-center justify-between mb-8">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Leader Control</h2>
-            <p className="text-slate-500 text-sm">Welcome back, {authUser?.name || 'Guest'}</p>
+      <main className="flex-1 overflow-y-auto p-4 md:p-8 pb-32">
+        <header className="flex items-center justify-between mb-8 pl-2">
+          <div className="flex flex-col items-start gap-1">
+            <AnimatedText text="Leader Control" as="h2" textClassName="text-3xl text-slate-900 dark:text-white" underlineGradient="from-indigo-600 to-purple-600 dark:from-indigo-400 dark:to-purple-400" underlineHeight="h-[3px]" underlineOffset="-bottom-2" className="items-start" />
+            <p className="text-slate-500 text-sm mt-3">Welcome back, {authUser?.name || 'Guest'}</p>
           </div>
           <button onClick={handleGlobalReset} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold shadow-md hover:bg-indigo-700">
             <Zap className="w-4 h-4" /> Reset All
           </button>
         </header>
 
-        {activeTab === 'dashboard' && <Dashboard drivers={drivers} />}
+        {activeTab === 'Dashboard' && <Dashboard drivers={filteredDrivers} assignedBoard={authUser?.assignedBoard} firebaseUid={user?.uid || authUser?.uid} />}
 
-        {activeTab === 'connection' && (
+        {activeTab === 'Connection' && (
           <div className="space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               <StatsCard title="Drivers" value={stats.total} icon={<ShieldCheck className="w-6 h-6 text-blue-500" />} color="bg-blue-50 dark:bg-blue-900/20" />
@@ -737,10 +830,10 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'profile-form' && <ProfileForm drivers={drivers} emailLogs={emailLogs} onSendReminder={handleProfileFormReminder} onUpdatePFDate={handleUpdatePFDate} />}
-        {activeTab === 'custom-email' && <CustomEmail drivers={drivers} onSendCustomEmail={handleCustomEmail} />}
-        {activeTab === 'ai-assistant' && <AIAssistant />}
-        {activeTab === 'history' && (
+        {activeTab === 'Profile Form' && <ProfileForm drivers={drivers} emailLogs={emailLogs} onSendReminder={handleProfileFormReminder} onUpdatePFDate={handleUpdatePFDate} />}
+        {activeTab === 'AI Assistant' && <AIAssistant />}
+        {activeTab === 'Broadcast' && <EmailBroadcast drivers={filteredDrivers} assignedBoard={authUser?.assignedBoard} firebaseUid={user?.uid || authUser?.uid} />}
+        {activeTab === 'History' && (
           <div className="space-y-4">
             {emailLogs.map(log => (
               <div key={log.id} className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 flex justify-between">
@@ -754,6 +847,10 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      <div className="absolute bottom-6 left-1/2 min-w-max -translate-x-1/2 z-50">
+          <MenuBar items={menuItems} activeItem={activeTab} onItemClick={setActiveTab} />
+      </div>
     </div>
   );
 };

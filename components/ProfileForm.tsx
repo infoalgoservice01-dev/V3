@@ -14,14 +14,21 @@ export const ProfileForm: React.FC<ProfileFormProps> = ({ drivers, emailLogs, on
     const [currentTime, setCurrentTime] = useState(new Date());
     const [boardFilter, setBoardFilter] = useState<string | 'ALL'>('ALL');
     const [statusFilter, setStatusFilter] = useState<'ALL' | 'UPDATED' | 'WARNING' | 'RISK' | 'OVERDUE' | 'EMAILED'>('ALL');
+    const [nameSearch, setNameSearch] = useState('');
 
     // Extract unique boards for the filter dropdown
     const boards = Array.from(new Set(drivers.map(d => d.board).filter(Boolean)));
 
     const filteredDrivers = useMemo(() => {
-        if (boardFilter === 'ALL') return drivers;
-        return drivers.filter(driver => driver.board === boardFilter);
-    }, [drivers, boardFilter]);
+        let filtered = drivers;
+        if (boardFilter !== 'ALL') {
+            filtered = filtered.filter(driver => driver.board === boardFilter);
+        }
+        if (nameSearch) {
+            filtered = filtered.filter(driver => driver.name.toLowerCase().includes(nameSearch.toLowerCase()));
+        }
+        return filtered;
+    }, [drivers, boardFilter, nameSearch]);
 
     // Enrich drivers with calculated statuses
     const enrichedDrivers = useMemo(() => {
@@ -180,7 +187,14 @@ export const ProfileForm: React.FC<ProfileFormProps> = ({ drivers, emailLogs, on
                     </h2>
                     <p className="text-slate-500 dark:text-slate-400 mt-1">Track and manage driver profile forms automatically.</p>
                 </div>
-                <div>
+                <div className="flex gap-2">
+                    <input
+                        type="text"
+                        placeholder="Search drivers..."
+                        value={nameSearch}
+                        onChange={(e) => setNameSearch(e.target.value)}
+                        className="text-sm border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-950 dark:text-slate-300 px-3 py-2 outline-none shadow-sm focus:ring-2 focus:ring-indigo-500"
+                    />
                     <select
                         value={boardFilter}
                         onChange={(e) => setBoardFilter(e.target.value)}

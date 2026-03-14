@@ -35,4 +35,8 @@ export interface ELDDriverPayload {
     isConnected: boolean;
     dutyStatus: DutyStatus;
     lastProfileUpdateIso: string | null;
+    board?: string; // Mapped from ELD group/fleet field
+    company?: string; // Mapped from ELD company/fleet name
+    deviceType?: string; // Mapped from ELD device info
+    appVersion?: string; // Mapped from ELD app version
 }

@@ -55,7 +55,16 @@ const authenticate = async (): Promise<string> => {
         throw new Error('[ELD AUTH] Missing ELD_API_KEY or ELD_API_USERNAME/PASSWORD in .env');
     }
 
-    const res = await eldApi.post('/auth/login', { email, password, recaptcha_token: 'bypass', recaptcha: '' });
+    let res;
+    try {
+        res = await eldApi.post('/auth/login', { email, password, recaptcha_token: 'bypass', recaptcha: '' });
+    } catch (apiError: any) {
+        // Extract the exact error message from the ELD API response
+        const apiData = apiError.response?.data;
+        const errMsg = apiData?.message || apiData?.error || JSON.stringify(apiData) || apiError.message;
+        console.error('[ELD AUTH] Login rejected by Leader ELD:', errMsg);
+        throw new Error(errMsg);
+    }
 
     // Extract token — common patterns: res.data.token, res.data.access_token, res.data.data.token
     const token =
@@ -66,7 +75,7 @@ const authenticate = async (): Promise<string> => {
 
     if (!token) {
         console.error('[ELD AUTH] Login response:', JSON.stringify(res.data, null, 2));
-        throw new Error('[ELD AUTH] Could not find token in login response. See above for full response.');
+        throw new Error('Token not found in login response.');
     }
 
     // Extract tenant_id from login if not already set
@@ -84,6 +93,27 @@ const authenticate = async (): Promise<string> => {
 
     console.log('[ELD AUTH] ✅ Authenticated successfully.');
     return token;
+};
+
+/**
+ * Reset cached auth state. Call this when new credentials are set at runtime.
+ */
+export const resetAuth = () => {
+    authToken = null;
+    tokenExpiry = 0;
+    tenantId = null;
+    console.log('[ELD AUTH] Auth cache cleared — will re-authenticate on next request.');
+};
+
+/**
+ * Test authentication with the current credentials. Returns { tenantId } on success.
+ * Throws on failure. Used by the configure endpoint to validate credentials from the UI.
+ */
+export const testELDAuth = async (): Promise<{ tenantId: string | null }> => {
+    // Force a fresh authentication (ignore cache)
+    resetAuth();
+    await authenticate();
+    return { tenantId };
 };
 
 /**
@@ -105,9 +135,9 @@ const buildHeaders = (token: string) => {
  * Merges /drivers (identity) + /hos/system-list (location, connection, duty).
  */
 export const fetchELDData = async (): Promise<ELDDriverPayload[]> => {
-    // Ensure required credentials are present
+    // Ensure required credentials are present (either API key OR username + password)
     if (!process.env.ELD_API_KEY && (!process.env.ELD_API_USERNAME || !process.env.ELD_API_PASSWORD)) {
-        console.warn('[ELD] Missing ELD API credentials; returning empty driver list.');
+        console.warn('[ELD] Missing ELD API credentials (no token and no login); returning empty driver list.');
         return [];
     }
     const token = await authenticate();
@@ -121,10 +151,18 @@ export const fetchELDData = async (): Promise<ELDDriverPayload[]> => {
     const PAGE_SIZE = 100;
 
     while (true) {
-        const driversRes = await eldApi.get('/drivers', {
-            headers,
-            params: { page, limit: PAGE_SIZE, tab: 'active', status: 'active', group: 'all', sortBy: 'driver', orderBy: 'asc' }
-        });
+        let driversRes;
+        try {
+            driversRes = await eldApi.get('/drivers', {
+                headers,
+                params: { page, limit: PAGE_SIZE, tab: 'active', status: 'active', group: 'all', sortBy: 'driver', orderBy: 'asc' }
+            });
+        } catch (apiError: any) {
+            const apiData = apiError.response?.data;
+            const errMsg = apiData?.message || apiData?.error || JSON.stringify(apiData) || apiError.message;
+            console.error(`[ELD FETCH] /drivers rejected:`, errMsg);
+            throw new Error(`ELD /drivers rejected: ${errMsg}`);
+        }
 
         const pageData: any[] = driversRes.data?.data || driversRes.data?.drivers || driversRes.data || [];
         if (!Array.isArray(pageData) || pageData.length === 0) break;
@@ -145,10 +183,18 @@ export const fetchELDData = async (): Promise<ELDDriverPayload[]> => {
     let hosPage = 1;
 
     while (true) {
-        const hosRes = await eldApi.get('/hos/system-list', {
-            headers,
-            params: { page: hosPage, limit: PAGE_SIZE, eld_status: 'all', duty_status: 'all' }
-        });
+        let hosRes;
+        try {
+            hosRes = await eldApi.get('/hos/system-list', {
+                headers,
+                params: { page: hosPage, limit: PAGE_SIZE, eld_status: 'all', duty_status: 'all' }
+            });
+        } catch (apiError: any) {
+             const apiData = apiError.response?.data;
+             const errMsg = apiData?.message || apiData?.error || JSON.stringify(apiData) || apiError.message;
+             console.error(`[ELD FETCH] /hos/system-list rejected:`, errMsg);
+             throw new Error(`ELD /hos/system-list rejected: ${errMsg}`);
+        }
 
         const hosPageData: any[] = hosRes.data?.data || hosRes.data?.list || hosRes.data || [];
         if (!Array.isArray(hosPageData) || hosPageData.length === 0) break;
@@ -192,6 +238,28 @@ export const fetchELDData = async (): Promise<ELDDriverPayload[]> => {
         // Profile form last updated — use driver's own updated_at field
         const lastProfileUpdateIso = d.profile_updated_at || d.pf_updated_at || d.updated_at || null;
 
+        // Extract board from ELD group/fleet/tag fields
+        const rawBoard =
+            d.group?.name ||
+            d.fleet?.name ||
+            d.board ||
+            d.tag ||
+            d.group_name ||
+            hos.group_name ||
+            null;
+        
+        // Extract company name
+        const company =
+            d.company?.name ||
+            d.carrier?.name ||
+            d.company_name ||
+            d.carrier_name ||
+            '';
+
+        // Device information
+        const deviceType = d.device_type || d.device?.type || hos.device_type || 'Leader ELD';
+        const appVersion = d.app_version || d.version || hos.app_version || '';
+
         return {
             driverId: String(id),
             fullName: `${d.first_name || ''} ${d.last_name || ''}`.trim() || 'Unknown Driver',
@@ -199,7 +267,11 @@ export const fetchELDData = async (): Promise<ELDDriverPayload[]> => {
             coordinates: { lat, lng },
             isConnected,
             dutyStatus,
-            lastProfileUpdateIso
+            lastProfileUpdateIso,
+            board: rawBoard || undefined,
+            company: company || undefined,
+            deviceType: deviceType || undefined,
+            appVersion: appVersion || undefined
         };
     });
 

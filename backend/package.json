@@ -14,6 +14,7 @@
     "dotenv": "^16.6.1",
     "express": "^4.18.2",
     "firebase-admin": "^11.10.1",
+    "multer": "^2.1.1",
     "node-cron": "^3.0.2",
     "nodemailer": "^6.9.4",
     "puppeteer": "^24.38.0"
@@ -21,6 +22,7 @@
   "devDependencies": {
     "@types/cors": "^2.8.13",
     "@types/express": "^4.17.17",
+    "@types/multer": "^2.1.0",
     "@types/node": "^20.4.5",
     "@types/node-cron": "^3.0.8",
     "@types/nodemailer": "^6.4.9",

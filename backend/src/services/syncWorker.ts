@@ -5,14 +5,18 @@ import { ELDDriverPayload, ELDStatus, DutyStatus } from '../types';
 
 /**
  * Firebase user IDs that should receive the synced driver data.
- * All accounts listed here will see the same 366 drivers in their dashboard.
+ * All accounts listed here will see the same drivers in their dashboard.
  */
 const FIREBASE_USER_IDS: string[] = [
     'glEDT7jKxsXiag5HmZekKuYwQ103',  // info.algoservice01@gmail.com
     'W9n0OWI6NPOS4J7owBTIull2yv52',   // westa@algogroup.us
 ];
 
-export const runSyncWorker = async () => {
+/**
+ * Core function that fetches ELD data and writes to Firestore for a given set of user IDs.
+ * Called by both the cron scheduler and the on-demand import endpoint.
+ */
+const runSyncForUserIds = async (userIds: string[]) => {
     console.log('\n================================');
     console.log('[WORKER] Starting ELD sync cycle...');
     console.log(`[WORKER] Time: ${new Date().toISOString()}`);
@@ -20,9 +24,6 @@ export const runSyncWorker = async () => {
 
     const now = new Date();
     const db = getDb();
-    const userIds = process.env.FIREBASE_USER_ID
-        ? [process.env.FIREBASE_USER_ID, ...FIREBASE_USER_IDS.filter(id => id !== process.env.FIREBASE_USER_ID)]
-        : FIREBASE_USER_IDS;
 
     console.log(`[WORKER] Writing to ${userIds.length} user account(s): ${userIds.join(', ')}`);
 
@@ -111,23 +112,23 @@ export const runSyncWorker = async () => {
             id: driverId,
             name: eldDriver.fullName,
             email: eldDriver.emailAddress,
-            // Preserve existing values for fields not provided by ELD
-            company: existingData.company || '',
-            board: existingData.board || '',
-            deviceType: existingData.deviceType || 'Leader ELD',
-            appVersion: existingData.appVersion || '',
+            // Use ELD-sourced fields; fallback to existing Firestore data
+            company: eldDriver.company || existingData.company || '',
+            board: eldDriver.board || existingData.board || '',
+            deviceType: eldDriver.deviceType || existingData.deviceType || 'Leader ELD',
+            appVersion: eldDriver.appVersion || existingData.appVersion || '',
             // Live ELD data
             eldStatus: eldDriver.isConnected ? ELDStatus.CONNECTED : ELDStatus.DISCONNECTED,
             dutyStatus: eldDriver.dutyStatus || DutyStatus.NOT_SET,
             emailSent: existingData.emailSent || false,
             followUp: existingData.followUp || null,
+            // GPS coordinates for map display
+            gpsLoc: eldDriver.coordinates,
             // Profile form tracking
             lastPFUpdate: eldDriver.lastProfileUpdateIso,
             last3DayEmail: updatedLast3DayEmail,
             last5DayEmail: updatedLast5DayEmail,
             lastDisconnectEmail: updatedDisconnectEmail,
-            // GPS coordinates for map display
-            gpsLoc: eldDriver.coordinates,
             // Metadata
             syncedAt: now.toISOString()
         };
@@ -153,4 +154,27 @@ export const runSyncWorker = async () => {
     console.log(`[WORKER]    Firestore writes: ${writtenCount}`);
     console.log(`[WORKER]    Emails sent: ${emailsSent}`);
     console.log('================================\n');
+
+    return { processedCount, writtenCount, emailsSent };
+};
+
+/**
+ * Run a full ELD sync cycle for ALL configured admin users (used by cron scheduler).
+ */
+export const runSyncWorker = async () => {
+    const userIds = process.env.FIREBASE_USER_ID
+        ? [process.env.FIREBASE_USER_ID, ...FIREBASE_USER_IDS.filter(id => id !== process.env.FIREBASE_USER_ID)]
+        : FIREBASE_USER_IDS;
+    return runSyncForUserIds(userIds);
+};
+
+/**
+ * Run a full ELD sync for a SINGLE user (triggered on-demand from the frontend).
+ * This allows a newly logged-in admin to import their drivers immediately without waiting for cron.
+ */
+export const runSyncForUser = async (firebaseUserId: string) => {
+    console.log(`[WORKER] On-demand import triggered for user: ${firebaseUserId}`);
+    // Include their UID plus all global admin UIDs so shared driver records stay in sync
+    const userIds = [firebaseUserId, ...FIREBASE_USER_IDS.filter(id => id !== firebaseUserId)];
+    return runSyncForUserIds(userIds);
 };

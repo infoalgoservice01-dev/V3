@@ -80,3 +80,28 @@ export const sendDisconnectionEmail = async (to: string, driverName: string): Pr
         return false;
     }
 };
+
+export const sendCustomBroadcastEmail = async (
+    to: string[], 
+    subject: string, 
+    htmlContent: string, 
+    attachments: { filename: string; path: string; cid?: string }[] = []
+): Promise<boolean> => {
+    if (to.length === 0) return false;
+    
+    try {
+        const mailOptions = {
+            from: FROM,
+            bcc: to, // Use BCC to hide recipients from each other
+            subject,
+            html: htmlContent,
+            attachments
+        };
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[EMAIL] ✅ Broadcast sent to ${to.length} recipients (ID: ${info.messageId})`);
+        return true;
+    } catch (e) {
+        console.error(`[EMAIL] ❌ Failed to send broadcast:`, e);
+        return false;
+    }
+};

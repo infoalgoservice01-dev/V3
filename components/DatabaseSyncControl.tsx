@@ -1,6 +1,5 @@
-
 import React from 'react';
-import { Database, CheckCircle2, Loader2, Cloud, CloudOff } from 'lucide-react';
+import { Database, Cloud, CloudOff, Loader2 } from 'lucide-react';
 
 interface DatabaseSyncControlProps {
     isConnected: boolean;
@@ -18,64 +17,25 @@ export const DatabaseSyncControl: React.FC<DatabaseSyncControlProps> = ({
     onToggleLiveMode
 }) => {
     return (
-        <div className="bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm mb-6 transition-colors">
-            <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                    <div className="p-2 bg-indigo-50 dark:bg-indigo-900/30 rounded-lg">
-                        <Database className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-                    </div>
-                    <div>
-                        <h4 className="text-sm font-bold text-slate-900 dark:text-white">Cloud Database</h4>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400">Firebase Firestore</p>
-                    </div>
-                </div>
-                <div className="flex items-center gap-2">
-                    {isConnected ? (
-                        <Cloud className="w-4 h-4 text-green-500" />
-                    ) : (
-                        <CloudOff className="w-4 h-4 text-slate-400" />
-                    )}
-                </div>
-            </div>
-
-            <div className="space-y-4">
-                <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
-                    <div className="flex items-center gap-2">
-                        <label className="relative inline-flex items-center cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={isLiveMode}
-                                onChange={(e) => onToggleLiveMode(e.target.checked)}
-                                className="sr-only peer"
-                            />
-                            <div className="w-7 h-4 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-600 transition-all"></div>
-                        </label>
-                        <span className="text-[11px] font-medium text-slate-600 dark:text-slate-400">Live Mode (Real Emails)</span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                        {isSyncing && (
-                            <span className="flex items-center gap-1 text-[10px] text-indigo-600 dark:text-indigo-500 font-bold">
-                                <Loader2 className="w-3 h-3 animate-spin" /> Syncing...
-                            </span>
-                        )}
-                        {isConnected && !isSyncing && lastSync && (
-                            <span className="flex items-center gap-1 text-[10px] text-green-600 dark:text-green-500 font-bold">
-                                <CheckCircle2 className="w-3 h-3" /> Updated {new Date(lastSync).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                            </span>
-                        )}
-                    </div>
-                </div>
-
-                <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-700">
-                    <div className="flex items-start gap-2">
-                        <div className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
-                            <p className="font-bold mb-1">✨ Auto-Sync Enabled</p>
-                            <p>All changes are automatically saved to your personal cloud database. Data syncs in real-time across all your devices.</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <button
+            onClick={() => onToggleLiveMode(!isLiveMode)}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all shadow-sm ${
+                isLiveMode 
+                  ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50' 
+                  : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
+            }`}
+            title={isLiveMode ? "Live Mode: ON (Click to disable)" : "Live Mode: OFF (Click to enable)"}
+        >
+            <Database className="w-4 h-4" />
+            <span className="text-xs font-bold hidden sm:inline-block">Cloud DB</span>
+            <div className="h-4 w-px bg-current opacity-20 mx-1"></div>
+            {isSyncing ? (
+                <Loader2 className="w-4 h-4 animate-spin text-indigo-500" />
+            ) : isConnected ? (
+                <Cloud className={`w-4 h-4 ${isLiveMode ? 'text-emerald-500' : 'text-slate-400'}`} />
+            ) : (
+                <CloudOff className="w-4 h-4 text-red-400" />
+            )}
+        </button>
     );
 };

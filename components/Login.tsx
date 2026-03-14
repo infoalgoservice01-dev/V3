@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AuthUser } from '../types';
+import { ROLE_MAPPING } from '../constants';
 import { Mail, Lock, User, ArrowRight, ShieldCheck } from 'lucide-react';
 import { SplineScene } from "./ui/splite";
 import { Card } from "./ui/card";
@@ -33,12 +34,23 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
           headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
         });
         const data = await res.json();
+        
+        // Evaluate RBAC assignment from email address
+        const assignedBoard = ROLE_MAPPING[data.email] || undefined;
+        
         onLogin({
           email: data.email,
           name: data.name,
-          picture: data.picture
+          picture: data.picture,
+          assignedBoard
         }, tokenResponse.access_token);
-        alert("Success: Logged in via Google!");
+        
+        if (assignedBoard) {
+            alert(`Success: Logged in via Google as Board Restricted User (${assignedBoard})!`);
+        } else {
+            alert("Success: Logged in via Google as Super Admin!");
+        }
+        
       } catch (error) {
         console.error("Failed to fetch user info", error);
         alert("Error fetching user info: " + (error instanceof Error ? error.message : "Unknown error"));
@@ -76,9 +88,13 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Keep demo/manual login for fallback or specific testing if needed,
-    // but ideally we want to encourage Google Sign In for the features.
-    onLogin({ email, name: name || email.split('@')[0] });
+    const assignedBoard = ROLE_MAPPING[email] || undefined;
+    onLogin({ 
+      email, 
+      name: name || email.split('@')[0],
+      assignedBoard,
+      uid: email // Use email as a deterministic mock UID for manual logins
+    });
   };
 
   return (
@@ -149,12 +165,20 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 <div className="h-px bg-neutral-800 flex-1" />
               </div>
 
-              <button
-                onClick={() => onLogin({ email: 'demo@leader-a1.com', name: 'Demo Admin' })}
-                className="w-full py-2 bg-neutral-800 text-neutral-400 rounded-xl font-bold text-[10px] hover:bg-neutral-700 hover:text-white transition-all border border-neutral-700 active:scale-95"
-              >
-                SKIP GOOGLE (DEMO MODE)
-              </button>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                <button
+                    onClick={(e) => { e.preventDefault(); onLogin({ email: 'boardA@leader-a1.com', name: 'Board A Manager', assignedBoard: 'Board A', uid: 'test-board-a' }); }}
+                    className="w-full py-2 bg-indigo-900/30 text-indigo-300 rounded-xl font-bold text-[10px] hover:bg-indigo-900/50 transition-all border border-indigo-800/50"
+                  >
+                    TEST BOARD A LOGIN
+                </button>
+                <button
+                    onClick={(e) => { e.preventDefault(); onLogin({ email: 'boardB@leader-a1.com', name: 'Board B Manager', assignedBoard: 'Board B', uid: 'test-board-b' }); }}
+                    className="w-full py-2 bg-purple-900/30 text-purple-300 rounded-xl font-bold text-[10px] hover:bg-purple-900/50 transition-all border border-purple-800/50"
+                  >
+                    TEST BOARD B LOGIN
+                </button>
+              </div>
             </div>
 
             <div className="flex mb-8 bg-neutral-800 p-1 rounded-xl">

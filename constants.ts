@@ -88,3 +88,13 @@ export const APP_CONFIG = {
   GEMINI_MODEL: 'gemini-3-flash-preview',
   MAX_EMAIL_PER_DISCONNECT: 1,
 };
+
+// ROLE-BASED ACCESS CONTROL
+// Maps specific user emails to a restricted Board ID.
+// Users not in this list will default to 'ALL' (Admin access).
+export const ROLE_MAPPING: Record<string, string> = {
+  // Mock examples for RBAC multi-tenant system
+  'boardA@leader-a1.com': 'Board A',
+  'boardB@leader-a1.com': 'Board B',
+  'boardC@leader-a1.com': 'Board C',
+};
